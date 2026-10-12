@@ -1,0 +1,75 @@
+name: Update OKX Historical Candles
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: okx-candle-data-update
+  cancel-in-progress: false
+
+jobs:
+  update-candles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout Zied
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip
+
+      - name: Check candle updater
+        run: |
+          test -f scripts/refresh_candles.py || {
+            echo "ERROR: scripts/refresh_candles.py is missing"
+            exit 1
+          }
+
+      - name: Refresh OKX candles
+        env:
+          CANDLE_LIMIT: "10000"
+          CANDLE_BAR: "1H"
+        run: python scripts/refresh_candles.py
+
+      - name: Push candles to data repository
+        env:
+          APP_REPO: ${{ secrets.APP_REPO }}
+          APP_REPO_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          test -n "$APP_REPO"
+          test -n "$APP_REPO_TOKEN"
+
+          git clone \
+            "https://x-access-token:${APP_REPO_TOKEN}@github.com/${APP_REPO}.git" \
+            candle-data-repo
+
+          mkdir -p candle-data-repo/data
+          cp -a data/. candle-data-repo/data/
+
+          cd candle-data-repo
+
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/
+
+          if ! git diff --cached --quiet; then
+            git commit -m "Update OKX historical candles"
+            git push
+          else
+            echo "No candle changes to commit"
+          fi
