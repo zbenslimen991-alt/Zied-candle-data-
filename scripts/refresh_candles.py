@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Download up to CANDLE_LIMIT historical OKX Spot 1H candles for live USDT pairs."""
+"""Refresh OKX Spot USDT candles for 15m, 1H, 4H and 1D into candle_history/<timeframe>/."""
 from __future__ import annotations
 
-import gzip
 import json
 import os
 import time
@@ -11,15 +10,15 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 BASE = "https://www.okx.com"
-OUT = Path("data")
-BAR = os.getenv("CANDLE_BAR", "1H")
+OUT = Path("candle_history")
+BARS = ("15m", "1H", "4H", "1D")
 TARGET = max(1, min(int(os.getenv("CANDLE_LIMIT", "10000")), 10000))
-PAGE_SIZE = 100  # OKX history-candles endpoint maximum
+PAGE_SIZE = 100
 DELAY = float(os.getenv("REQUEST_DELAY", "0.15"))
 EXCLUDED_BASES = {
     "USDC", "USDG", "DAI", "TUSD", "FDUSD", "USDE", "USDD", "USDP",
     "PYUSD", "EURC", "EURT", "UST", "USTC", "FRAX", "LUSD", "USDS",
-    "USD0", "USD1", "RLUSD", "GUSD", "BUSD", "USDX", "USDK", "USDS"
+    "USD0", "USD1", "RLUSD", "GUSD", "BUSD", "USDX", "USDK"
 }
 
 def get_json(path: str, params: dict | None = None):
@@ -44,16 +43,11 @@ def eligible_instruments():
         result.append(inst)
     return sorted(set(result))
 
-def fetch_candles(inst: str):
+def fetch_candles(inst: str, bar: str):
     rows = {}
     cursor = None
     while len(rows) < TARGET:
-        params = {
-            "instId": inst,
-            "bar": BAR,
-            "limit": str(min(PAGE_SIZE, TARGET - len(rows))),
-        }
-        # OKX returns history in descending timestamp order; after requests older data.
+        params = {"instId": inst, "bar": bar, "limit": str(min(PAGE_SIZE, TARGET - len(rows)))}
         if cursor is not None:
             params["after"] = cursor
         page = get_json("/api/v5/market/history-candles", params)
@@ -68,8 +62,7 @@ def fetch_candles(inst: str):
             timestamps.append(int(ts))
         if not timestamps:
             break
-        oldest = min(timestamps)
-        next_cursor = str(oldest)
+        next_cursor = str(min(timestamps))
         if cursor == next_cursor or len(page) < 2:
             break
         cursor = next_cursor
@@ -77,47 +70,54 @@ def fetch_candles(inst: str):
     return [rows[k] for k in sorted(rows, key=int)][-TARGET:]
 
 def main():
-    OUT.mkdir(parents=True, exist_ok=True)
     instruments = eligible_instruments()
-    print(f"Eligible live OKX Spot/USDT pairs: {len(instruments)}; bar={BAR}; target={TARGET}")
-    failures = []
-    updated = 0
-    for i, inst in enumerate(instruments, 1):
-        path = OUT / f"{inst.replace('/', '_')}_{BAR}.json.gz"
-        try:
-            candles = fetch_candles(inst)
-            if not candles:
-                raise RuntimeError("OKX returned no candles")
-            payload = {
-                "exchange": "OKX", "market": "SPOT", "instId": inst,
-                "bar": BAR, "target_candles": TARGET,
-                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "columns": ["ts", "open", "high", "low", "close", "volume",
-                            "volume_currency", "volume_quote", "confirm"],
-                "candles": candles,
-            }
-            with gzip.open(path, "wt", encoding="utf-8", compresslevel=6) as f:
-                json.dump(payload, f, separators=(",", ":"))
-            updated += 1
-            print(f"[{i}/{len(instruments)}] {inst}: {len(candles)} candles")
-        except Exception as exc:
-            failures.append({"instId": inst, "error": str(exc)})
-            print(f"[{i}/{len(instruments)}] ERROR {inst}: {exc}")
-        time.sleep(DELAY)
-
-    status = {
+    OUT.mkdir(parents=True, exist_ok=True)
+    overall = {
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "exchange": "OKX", "market": "SPOT", "quote": "USDT",
-        "bar": BAR, "target_candles": TARGET,
-        "eligible_pairs": len(instruments), "updated_pairs": updated,
-        "failed_pairs": failures,
+        "target_candles": TARGET, "timeframes": {}
     }
-    (OUT / "refresh_status.json").write_text(
-        json.dumps(status, indent=2), encoding="utf-8"
-    )
-    print(json.dumps(status, indent=2))
-    if failures:
-        raise SystemExit(f"{len(failures)} pair(s) failed; inspect data/refresh_status.json")
+    all_failures = []
+    for bar in BARS:
+        folder = OUT / bar
+        folder.mkdir(parents=True, exist_ok=True)
+        failures = []
+        updated = 0
+        print(f"Starting {bar}: {len(instruments)} live Spot/USDT pairs, target={TARGET}")
+        for i, inst in enumerate(instruments, 1):
+            path = folder / f"{inst}_{bar}.json"
+            try:
+                candles = fetch_candles(inst, bar)
+                if not candles:
+                    raise RuntimeError("OKX returned no candles")
+                payload = {
+                    "exchange": "OKX", "market": "SPOT", "instId": inst,
+                    "bar": bar, "target_candles": TARGET,
+                    "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "columns": ["ts", "open", "high", "low", "close", "volume",
+                                "volume_currency", "volume_quote", "confirm"],
+                    "candles": candles,
+                }
+                path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+                updated += 1
+                print(f"[{bar} {i}/{len(instruments)}] {inst}: {len(candles)} candles")
+            except Exception as exc:
+                failures.append({"instId": inst, "bar": bar, "error": str(exc)})
+                print(f"[{bar} {i}/{len(instruments)}] ERROR {inst}: {exc}")
+            time.sleep(DELAY)
+        overall["timeframes"][bar] = {
+            "eligible_pairs": len(instruments), "updated_pairs": updated,
+            "failed_pairs": len(failures)
+        }
+        all_failures.extend(failures)
+        (OUT / "refresh_status.json").write_text(json.dumps(overall, indent=2), encoding="utf-8")
+    overall["failed_pairs"] = all_failures
+    (OUT / "refresh_status.json").write_text(json.dumps(overall, indent=2), encoding="utf-8")
+    print(json.dumps(overall, indent=2))
+    if any(not overall["timeframes"].get(bar, {}).get("updated_pairs") for bar in BARS):
+        raise SystemExit("At least one timeframe did not update any pairs.")
+    if all_failures:
+        raise SystemExit(f"{len(all_failures)} pair/timeframe updates failed; inspect candle_history/refresh_status.json")
 
 if __name__ == "__main__":
     main()
