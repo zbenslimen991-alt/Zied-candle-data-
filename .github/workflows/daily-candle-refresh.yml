@@ -6,7 +6,7 @@ on:
     - cron: "17 2 * * *"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: okx-candle-data-update
@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Checkout Zied main branch
+      - name: Checkout candle data repository
         uses: actions/checkout@v4
         with:
           ref: main
@@ -34,15 +34,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "Repository: $GITHUB_REPOSITORY"
-          echo "Branch: $GITHUB_REF_NAME"
-          git rev-parse --short HEAD
-          if [[ ! -f "scripts/refresh_candles.py" ]]; then
-            echo "::error::scripts/refresh_candles.py is missing from the checked-out commit."
-            echo "Check that the file is committed on the main branch."
-            find . -maxdepth 3 -type f | sort | head -200
-            exit 1
-          fi
+          test -f scripts/refresh_candles.py
           python -m py_compile scripts/refresh_candles.py
           echo "Candle updater found and Python syntax is valid."
 
@@ -73,35 +65,22 @@ jobs:
               raise SystemExit("No candle pairs were updated.")
           PY
 
-      - name: Publish candles to data repository
-        env:
-          APP_REPO: ${{ secrets.APP_REPO }}
-          APP_REPO_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
+      - name: Publish candles to this repository
         shell: bash
         run: |
           set -euo pipefail
-
-          if [[ -z "${APP_REPO:-}" ]]; then
-            echo "::error::Repository secret APP_REPO is missing."
-            exit 1
-          fi
-          if [[ -z "${APP_REPO_TOKEN:-}" ]]; then
-            echo "::error::Repository secret APP_REPO_TOKEN is missing."
-            exit 1
-          fi
-
-          git clone --depth 1 "https://x-access-token:${APP_REPO_TOKEN}@github.com/${APP_REPO}.git" candle-data-repo
-          mkdir -p candle-data-repo/data
-          cp -a data/. candle-data-repo/data/
-
-          cd candle-data-repo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/
+
+          # Rebase the publication base onto the latest main without overwriting
+          # generated files or unrelated repository changes.
+          git fetch origin main
+          git reset --mixed origin/main
+          git add -f data/
 
           if git diff --cached --quiet; then
             echo "No candle data changes to publish."
           else
             git commit -m "Update OKX historical candles"
-            git push origin HEAD
+            git push origin HEAD:main
           fi
