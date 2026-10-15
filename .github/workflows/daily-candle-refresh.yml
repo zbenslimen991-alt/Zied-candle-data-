@@ -41,7 +41,6 @@ jobs:
       - name: Refresh OKX historical candles
         env:
           CANDLE_LIMIT: "10000"
-          CANDLE_BAR: "1H"
           PYTHONUNBUFFERED: "1"
         run: python scripts/refresh_candles.py
 
@@ -49,20 +48,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -s data/refresh_status.json
+          test -s candle_history/refresh_status.json
           python - <<'PY'
           import json
           from pathlib import Path
-          status = json.loads(Path("data/refresh_status.json").read_text(encoding="utf-8"))
+          status = json.loads(Path("candle_history/refresh_status.json").read_text(encoding="utf-8"))
           print(json.dumps({
-              "bar": status.get("bar"),
               "target_candles": status.get("target_candles"),
-              "eligible_pairs": status.get("eligible_pairs"),
-              "updated_pairs": status.get("updated_pairs"),
+              "timeframes": status.get("timeframes"),
               "failed_pairs": len(status.get("failed_pairs", [])),
           }, indent=2))
-          if not status.get("updated_pairs"):
-              raise SystemExit("No candle pairs were updated.")
+          expected = {"15m", "1H", "4H", "1D"}
+          if set(status.get("timeframes", {})) != expected:
+              raise SystemExit("Missing one or more required timeframes.")
+          if any(not status["timeframes"][bar].get("updated_pairs") for bar in expected):
+              raise SystemExit("At least one timeframe has no updated pairs.")
           PY
 
       - name: Publish candle data to Zied repository
@@ -78,17 +78,17 @@ jobs:
           fi
 
           git clone --depth 1 "https://x-access-token:${ZIED_REPO_TOKEN}@github.com/${ZIED_REPO}.git" zied-repo
-          mkdir -p zied-repo/data
-          cp -a data/. zied-repo/data/
+          mkdir -p zied-repo/candle_history
+          cp -a candle_history/. zied-repo/candle_history/
 
           cd zied-repo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f data/
+          git add -f candle_history/
 
           if git diff --cached --quiet; then
             echo "No candle data changes to publish to Zied."
           else
-            git commit -m "Update OKX historical candles"
+            git commit -m "Update OKX Spot candles (15m, 1H, 4H, 1D)"
             git push origin HEAD:main
           fi
