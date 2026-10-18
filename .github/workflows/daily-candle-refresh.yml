@@ -30,17 +30,35 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Verify updater exists
+      - name: Verify updater and access to Zied
+        env:
+          ZIED_REPO: "zbenslimen991-alt/Zied"
+          ZIED_REPO_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
           test -f scripts/refresh_candles.py
           python -m py_compile scripts/refresh_candles.py
-          echo "Candle updater found and Python syntax is valid."
+          if [[ -z "${ZIED_REPO_TOKEN:-}" ]]; then
+            echo "::error::Missing repository secret APP_REPO_TOKEN. Add a token with Contents: Read and write access to zbenslimen991-alt/Zied."
+            exit 1
+          fi
+          # Reuse the saved history from Zied so daily runs update only recent
+          # candles instead of downloading 10,000 candles for every pair again.
+          git clone --depth 1 "https://x-access-token:${ZIED_REPO_TOKEN}@github.com/${ZIED_REPO}.git" zied-repo
+          mkdir -p candle_history
+          if [[ -d zied-repo/candle_history ]]; then
+            cp -a zied-repo/candle_history/. candle_history/
+            echo "Existing candle history restored from Zied for incremental refresh."
+          else
+            echo "No existing candle history found in Zied; this is a full historical backfill."
+          fi
 
       - name: Refresh OKX historical candles
         env:
           CANDLE_LIMIT: "10000"
+          CANDLE_WORKERS: "8"
+          REQUEST_INTERVAL: "0.11"
           PYTHONUNBUFFERED: "1"
         run: python scripts/refresh_candles.py
 
@@ -55,6 +73,7 @@ jobs:
           status = json.loads(Path("candle_history/refresh_status.json").read_text(encoding="utf-8"))
           print(json.dumps({
               "target_candles": status.get("target_candles"),
+              "workers": status.get("workers"),
               "timeframes": status.get("timeframes"),
               "failed_pairs": len(status.get("failed_pairs", [])),
           }, indent=2))
@@ -67,20 +86,11 @@ jobs:
 
       - name: Publish candle data to Zied repository
         env:
-          ZIED_REPO: "zbenslimen991-alt/Zied"
           ZIED_REPO_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "${ZIED_REPO_TOKEN:-}" ]]; then
-            echo "::error::Missing repository secret APP_REPO_TOKEN. Add a token with Contents: Read and write access to zbenslimen991-alt/Zied."
-            exit 1
-          fi
-
-          git clone --depth 1 "https://x-access-token:${ZIED_REPO_TOKEN}@github.com/${ZIED_REPO}.git" zied-repo
-          mkdir -p zied-repo/candle_history
           cp -a candle_history/. zied-repo/candle_history/
-
           cd zied-repo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
