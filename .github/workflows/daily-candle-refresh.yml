@@ -1,6 +1,10 @@
 name: update-candles
 
 on:
+  push:
+    paths:
+      - "scripts/refresh_candles.py"
+      - ".github/workflows/daily-candle-refresh.yml"
   workflow_dispatch:
   schedule:
     - cron: "17 2 * * *"
