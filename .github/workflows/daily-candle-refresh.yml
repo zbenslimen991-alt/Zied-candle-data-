@@ -47,8 +47,6 @@ jobs:
             echo "::error::Missing repository secret APP_REPO_TOKEN. Add a token with Contents: Read and write access to zbenslimen991-alt/Zied."
             exit 1
           fi
-          # Reuse the saved history from Zied so daily runs update only recent
-          # candles instead of downloading 10,000 candles for every pair again.
           git clone --depth 1 "https://x-access-token:${ZIED_REPO_TOKEN}@github.com/${ZIED_REPO}.git" zied-repo
           mkdir -p candle_history
           if [[ -d zied-repo/candle_history ]]; then
@@ -94,10 +92,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cp -a candle_history/. zied-repo/candle_history/
           cd zied-repo
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Refresh the remote branch immediately before publishing so commits
+          # made while candles were downloading are preserved.
+          git fetch origin main
+          git reset --hard origin/main
+
+          cp -a ../candle_history/. candle_history/
           git add -f candle_history/
 
           if git diff --cached --quiet; then
