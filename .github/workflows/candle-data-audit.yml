@@ -1,0 +1,39 @@
+name: Candle data tests and history audit
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/refresh_candles.py"
+      - "tests/test_candle_data.py"
+      - "scripts/audit_candle_history.py"
+      - "candle_history/**/*.json"
+      - ".github/workflows/candle-data-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  candle-data-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile candle refresh module
+        run: python -m py_compile scripts/refresh_candles.py scripts/audit_candle_history.py
+      - name: Test candle data read/write compatibility
+        run: python tests/test_candle_data.py
+      - name: Inventory stored historical candles
+        run: python scripts/audit_candle_history.py
+      - name: Upload candle audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zied-candle-data-audit-${{ github.run_id }}
+          path: candle_history_audit_report.json
+          if-no-files-found: warn
