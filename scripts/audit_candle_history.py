@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+METADATA_FILENAMES = {"refresh_status.json"}
 
 
 def configured_path(env_name: str, default: Path) -> Path:
@@ -64,10 +65,23 @@ def validate(row):
 
 def main():
     now_ms = datetime.now(timezone.utc).timestamp() * 1000
-    files = sorted(BASE.rglob("*.json")) if BASE.is_dir() else []
-    counts, timeframe, details = Counter(), Counter(), []
+    all_json = sorted(BASE.rglob("*.json")) if BASE.is_dir() else []
+    metadata_files = [p for p in all_json if p.name.lower() in METADATA_FILENAMES]
+    files = [p for p in all_json if p.name.lower() not in METADATA_FILENAMES]
+    counts, timeframe, details, layouts = Counter(), Counter(), [], Counter()
     for path in files:
         counts["filesFound"] += 1
+        # The candle-data updater writes <pair>_<timeframe>.json inside each
+        # timeframe directory. Zied's candle_store prefers <pair>.json there;
+        # its fallback is <pair>_<timeframe>.json directly under candle_history.
+        if path.parent != BASE and path.stem.upper().endswith(("_15M", "_1H", "_4H", "_1D")):
+            layouts["timeframe_dir_suffixed"] += 1
+        elif path.parent != BASE and path.stem.upper().endswith(("_15M", "_1H", "_4H", "_1D")) is False:
+            layouts["timeframe_dir_plain"] += 1
+        elif path.parent == BASE and path.stem.upper().endswith(("_15M", "_1H", "_4H", "_1D")):
+            layouts["root_suffixed_legacy"] += 1
+        else:
+            layouts["other_layout"] += 1
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             rows = rows_from(payload)
@@ -111,7 +125,7 @@ def main():
     if not files:
         reason = ("history directory does not exist in this checkout"
                   if not BASE.is_dir() else
-                  "directory exists but contains no .json files; generated data may not be committed or restored")
+                  "directory exists but contains no candle JSON files after excluding known metadata files")
     else:
         reason = None
     report = {
@@ -119,19 +133,23 @@ def main():
         "root": str(BASE),
         "directoryExists": BASE.is_dir(),
         "filesFound": len(files),
+        "metadataFilesExcluded": len(metadata_files),
+        "metadataFiles": [str(p.relative_to(BASE)) for p in metadata_files],
         "summary": dict(counts),
         "filesByTimeframe": dict(timeframe),
+        "filenameLayouts": dict(layouts),
         "files": details,
         "emptyReason": reason,
         "readOnly": True,
-        "note": "Only files present in the selected directory at audit time are included.",
+        "note": "Read-only audit. Filename layouts are classified for diagnosis only; no files are deleted or rewritten.",
     }
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps({"report": str(REPORT), "root": str(BASE),
                       "directoryExists": BASE.is_dir(), "filesFound": len(files),
+                      "metadataFilesExcluded": len(metadata_files),
                       "summary": dict(counts), "filesByTimeframe": dict(timeframe),
-                      "emptyReason": reason}, ensure_ascii=False))
+                      "filenameLayouts": dict(layouts), "emptyReason": reason}, ensure_ascii=False))
     return 0
 
 
