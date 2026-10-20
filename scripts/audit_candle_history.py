@@ -1,15 +1,29 @@
 #!/usr/bin/env python3
-"""Read-only inventory of candle_history JSON files; never edits source data."""
+"""Read-only inventory of candle_history JSON files; never edits source data.
+
+The directory can be overridden with CANDLE_HISTORY_DIR, and the report path
+with CANDLE_AUDIT_REPORT. Relative paths are resolved from the repository root.
+"""
 import json
 import math
+import os
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-BASE = ROOT / "candle_history"
-NOW = datetime.now(timezone.utc).timestamp() * 1000
-REPORT = ROOT / "candle_history_audit_report.json"
+
+
+def configured_path(env_name: str, default: Path) -> Path:
+    raw = os.getenv(env_name)
+    if not raw:
+        return default
+    path = Path(raw)
+    return path.resolve() if path.is_absolute() else (ROOT / path).resolve()
+
+
+BASE = configured_path("CANDLE_HISTORY_DIR", ROOT / "candle_history")
+REPORT = configured_path("CANDLE_AUDIT_REPORT", ROOT / "candle_history_audit_report.json")
 
 
 def finite(v):
@@ -49,7 +63,8 @@ def validate(row):
 
 
 def main():
-    files = sorted(BASE.rglob("*.json")) if BASE.exists() else []
+    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+    files = sorted(BASE.rglob("*.json")) if BASE.is_dir() else []
     counts, timeframe, details = Counter(), Counter(), []
     for path in files:
         counts["filesFound"] += 1
@@ -76,7 +91,7 @@ def main():
                     counts["unreadableOrInvalid"] += 1
                     status = "NO_TIMESTAMP"
                 else:
-                    age = (NOW - last_ts) / 3_600_000
+                    age = (now_ms - last_ts) / 3_600_000
                     if age > 30:
                         counts["staleOver30h"] += 1
                         status = "STALE_OVER_30H"
@@ -85,21 +100,38 @@ def main():
                         status = "FRESH_OR_RECENT"
             tf = (payload.get("bar") if isinstance(payload, dict) else None) or path.parent.name
             timeframe[str(tf)] += 1
-            details.append({"file": str(path.relative_to(ROOT)), "timeframe": str(tf),
+            details.append({"file": str(path.relative_to(BASE)), "timeframe": str(tf),
                             "rows": n, "validRows": valid_n, "lastTimestamp": last_ts,
                             "status": status})
         except Exception as exc:
             counts["unreadableOrInvalid"] += 1
-            details.append({"file": str(path.relative_to(ROOT)), "status": "UNREADABLE",
+            details.append({"file": str(path.relative_to(BASE)), "status": "UNREADABLE",
                             "error": str(exc)})
-    report = {"generatedAt": datetime.now(timezone.utc).isoformat(),
-              "root": str(BASE.relative_to(ROOT)), "filesFound": len(files),
-              "summary": dict(counts), "filesByTimeframe": dict(timeframe), "files": details,
-              "note": "Read-only report; only files present in this checkout are included."}
+
+    if not files:
+        reason = ("history directory does not exist in this checkout"
+                  if not BASE.is_dir() else
+                  "directory exists but contains no .json files; generated data may not be committed or restored")
+    else:
+        reason = None
+    report = {
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "root": str(BASE),
+        "directoryExists": BASE.is_dir(),
+        "filesFound": len(files),
+        "summary": dict(counts),
+        "filesByTimeframe": dict(timeframe),
+        "files": details,
+        "emptyReason": reason,
+        "readOnly": True,
+        "note": "Only files present in the selected directory at audit time are included.",
+    }
+    REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps({"report": str(REPORT), "filesFound": len(files),
-                      "summary": dict(counts), "filesByTimeframe": dict(timeframe)},
-                     ensure_ascii=False))
+    print(json.dumps({"report": str(REPORT), "root": str(BASE),
+                      "directoryExists": BASE.is_dir(), "filesFound": len(files),
+                      "summary": dict(counts), "filesByTimeframe": dict(timeframe),
+                      "emptyReason": reason}, ensure_ascii=False))
     return 0
 
 
