@@ -28,6 +28,8 @@ jobs:
         run: python -m py_compile scripts/refresh_candles.py scripts/audit_candle_history.py
       - name: Test candle data read/write compatibility
         run: python tests/test_candle_data.py
+      - name: Test candle history audit
+        run: python tests/test_candle_audit.py
       - name: Inventory stored historical candles
         run: python scripts/audit_candle_history.py
       - name: Upload candle audit report
