@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout repository
+      - name: Checkout candle data code
         uses: actions/checkout@v4
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,7 +30,27 @@ jobs:
         run: python tests/test_candle_data.py
       - name: Test candle history audit
         run: python tests/test_candle_audit.py
-      - name: Inventory stored historical candles
+      - name: Restore real candle history from Zied
+        env:
+          ZIED_REPO_TOKEN: ${{ secrets.APP_REPO_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${ZIED_REPO_TOKEN:-}" ]]; then
+            echo "::error::Missing APP_REPO_TOKEN; cannot audit the real candle history stored in zbenslimen991-alt/Zied."
+            exit 1
+          fi
+          git clone --depth 1 "https://x-access-token:${ZIED_REPO_TOKEN}@github.com/zbenslimen991-alt/Zied.git" zied-repo
+          if [[ ! -d zied-repo/candle_history ]]; then
+            echo "::error::Zied repository has no candle_history directory."
+            exit 1
+          fi
+          echo "Restored candle_history from Zied repository."
+          find zied-repo/candle_history -type f -name '*.json' | wc -l | awk '{print "JSON files available for audit: " $1}'
+      - name: Inventory real historical candles in Zied
+        env:
+          CANDLE_HISTORY_DIR: zied-repo/candle_history
+          CANDLE_AUDIT_REPORT: candle_history_audit_report.json
         run: python scripts/audit_candle_history.py
       - name: Upload candle audit report
         if: always()
