@@ -35,6 +35,24 @@ class CandleAuditTests(unittest.TestCase):
             self.assertEqual(report["filesByTimeframe"], {"1H": 1})
             self.assertEqual(report["files"][0]["validRows"], 1)
             self.assertTrue(report["readOnly"])
+            self.assertEqual(report["filenameLayouts"], {"timeframe_dir_suffixed": 1})
+
+    def test_excludes_refresh_status_metadata_from_candle_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "history"
+            base.mkdir(parents=True)
+            (base / "refresh_status.json").write_text(json.dumps({"updated": True}), encoding="utf-8")
+            report_path = Path(tmp) / "report.json"
+            env = os.environ.copy()
+            env["CANDLE_HISTORY_DIR"] = str(base)
+            env["CANDLE_AUDIT_REPORT"] = str(report_path)
+            subprocess.run([sys.executable, str(AUDIT)], env=env,
+                           capture_output=True, text=True, check=True)
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["filesFound"], 0)
+            self.assertEqual(report["metadataFilesExcluded"], 1)
+            self.assertEqual(report["metadataFiles"], ["refresh_status.json"])
+            self.assertEqual(report["summary"], {})
 
     def test_reports_missing_history_directory_without_crashing(self):
         with tempfile.TemporaryDirectory() as tmp:
