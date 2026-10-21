@@ -1,0 +1,151 @@
+name: Daily Learning
+
+on:
+  schedule:
+    # Run daily at 04:00 UTC
+    - cron: '0 4 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  daily-learning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Serialize learning with scanner/backtest state updates in the shared app repo.
+    concurrency:
+      group: okx-quant-portfolio-state
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout private app repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.APP_REPO }}
+          token: ${{ secrets.APP_REPO_TOKEN }}
+          path: app
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: app/requirements.txt
+
+      - name: Install dependencies
+        working-directory: app
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate required persisted state
+        working-directory: app
+        run: |
+          set -euo pipefail
+          for pattern in 'ml_model_memory_*.json' 'analysis_memory_*.json' 'strategy_stats_*.json'; do
+            file="$(find . -maxdepth 2 -type f -name "$pattern" -size +0c -print -quit)"
+            if [ -z "$file" ]; then
+              echo "ERROR: required learning state missing or empty: $pattern"
+              exit 1
+            fi
+            echo "Found $pattern at $file"
+          done
+
+      - name: Refresh primary H1 candle history
+        working-directory: app
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import sys
+          from concurrent.futures import ThreadPoolExecutor, as_completed
+
+          sys.path.insert(0, "okx_quant")
+          from api import get_pairs
+          from candle_store import update_historical_candles
+
+          pairs = get_pairs()
+          if not pairs:
+              raise SystemExit("ERROR: OKX returned no eligible live Spot/USDT pairs; refusing to mark candle refresh successful.")
+
+          print(f"[Daily H1 Refresh] eligible_pairs={len(pairs)}")
+          failures = []
+          refreshed = 0
+
+          def refresh(pair):
+              inst_id = pair.get("instId")
+              if not inst_id:
+                  raise ValueError("instrument has no instId")
+              df, added, last_ts = update_historical_candles(inst_id)
+              if df is None or df.empty or last_ts is None:
+                  raise RuntimeError(f"no usable H1 candles persisted for {inst_id}")
+              return inst_id, len(df), added, last_ts
+
+          # Bounded concurrency reduces run time while keeping API pressure limited.
+          with ThreadPoolExecutor(max_workers=3) as pool:
+              futures = {pool.submit(refresh, pair): pair for pair in pairs}
+              for future in as_completed(futures):
+                  pair = futures[future]
+                  try:
+                      inst_id, count, added, last_ts = future.result()
+                      refreshed += 1
+                      print(f"[Daily H1 Refresh] {inst_id}: candles={count} added={added} last_ts={last_ts}")
+                  except Exception as exc:
+                      inst_id = pair.get("instId", "UNKNOWN")
+                      failures.append({"instId": inst_id, "error": str(exc)[:200]})
+                      print(f"[Daily H1 Refresh] ERROR {inst_id}: {exc}")
+
+          print(f"[Daily H1 Refresh Summary] refreshed={refreshed}/{len(pairs)} failed={len(failures)}")
+          if failures:
+              print(f"[Daily H1 Refresh Failures] {failures[:20]}")
+              raise SystemExit(f"{len(failures)} H1 pair refresh(es) failed; audit must not be treated as fully fresh.")
+          PY
+
+      - name: Run daily learning
+        working-directory: app
+        env:
+          ZIED_TRAIN_HISTORICAL_AI: "0"
+        run: |
+          set -o pipefail
+          python okx_quant/weekly_learning.py 2>&1 | tee "${RUNNER_TEMP}/daily-learning.log"
+
+      - name: Run strategy and candle freshness audit
+        working-directory: app
+        run: |
+          set -o pipefail
+          python okx_quant/learning_audit.py 2>&1 | tee "${RUNNER_TEMP}/learning-audit.log"
+
+      - name: Persist refreshed H1 candles and audit history in private app repository
+        working-directory: app
+        run: |
+          set -euo pipefail
+          git add learning_audit_report.json learning_audit_history.json
+          # Persist only the canonical H1 directory; legacy files and other
+          # timeframes are retained unchanged for backward compatibility.
+          if [ -d candle_history/1H ]; then
+            git add -f candle_history/1H/
+          fi
+          if git diff --cached --quiet; then
+            echo "No candle or audit report changes to persist."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git commit -m "Refresh daily H1 candle history and learning audit [skip ci]"
+          git pull --rebase origin "$(git branch --show-current)"
+          git push origin "HEAD:$(git branch --show-current)"
+
+      - name: Upload daily learning and audit reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-learning-audit-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/daily-learning.log
+            ${{ runner.temp }}/learning-audit.log
+            app/learning_audit_report.json
+          if-no-files-found: warn
+          retention-days: 14
