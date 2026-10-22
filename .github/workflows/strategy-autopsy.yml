@@ -28,9 +28,9 @@ jobs:
       - name: Checkout private Zied source repository
         uses: actions/checkout@v4
         with:
-          repository: zbenslimen991-alt/Zied
+          repository: ${{ secrets.APP_REPO }}
           ref: main
-          token: ${{ secrets.ZIED_REPO_TOKEN }}
+          token: ${{ secrets.APP_REPO_TOKEN }}
           path: zied-source
           persist-credentials: false
 
