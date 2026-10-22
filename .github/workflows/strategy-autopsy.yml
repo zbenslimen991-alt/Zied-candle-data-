@@ -62,6 +62,7 @@ jobs:
           python -m py_compile okx_quant/historical_ai.py
           python -m py_compile okx_quant/weekly_learning.py
           python -m py_compile okx_quant/audit_strategy_performance.py
+          python -m py_compile okx_quant/audit_signal_quality_historical.py
           python -m py_compile okx_quant/audit_strategy_oos_performance.py
 
       - name: Run Signal Quality Score tests
@@ -84,11 +85,17 @@ jobs:
         working-directory: zied-source
         run: python okx_quant/audit_strategy_performance.py
 
+      - name: Evaluate historical signal quality against closed trades
+        working-directory: zied-source
+        run: python okx_quant/audit_signal_quality_historical.py
+
       - name: Upload strategy performance and autopsy report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: strategy-performance-autopsy
-          path: zied-source/strategy_performance_audit.json
+          path: |
+            zied-source/strategy_performance_audit.json
+            zied-source/signal_quality_historical_audit.json
           if-no-files-found: ignore
           retention-days: 30
