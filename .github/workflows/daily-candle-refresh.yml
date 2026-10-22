@@ -108,5 +108,31 @@ jobs:
             echo "No candle data changes to publish to Zied."
           else
             git commit -m "Update OKX Spot candles (15m, 1H, 4H, 1D)"
-            git push origin HEAD:main
+
+            # Another workflow may update Zied while candle data is being
+            # generated. Rebase this candle-only commit on the newest main
+            # and retry instead of failing on a non-fast-forward push.
+            pushed=false
+            for attempt in 1 2 3 4 5; do
+              git fetch origin main
+              if ! git rebase origin/main; then
+                echo "::error::Could not rebase candle update on latest Zied/main; preserving remote commits and stopping safely."
+                git rebase --abort || true
+                exit 1
+              fi
+
+              if git push origin HEAD:main; then
+                pushed=true
+                echo "Candle data published successfully on attempt ${attempt}."
+                break
+              fi
+
+              echo "Push attempt ${attempt} raced with another commit; retrying against latest main."
+              sleep 2
+            done
+
+            if [[ "${pushed}" != "true" ]]; then
+              echo "::error::Unable to publish candle data after 5 safe retries."
+              exit 1
+            fi
           fi
