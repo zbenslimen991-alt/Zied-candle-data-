@@ -50,6 +50,7 @@ jobs:
         run: |
           python -m py_compile okx_quant/config.py
           python -m py_compile okx_quant/analyze_coin.py
+          python -m py_compile okx_quant/signal_quality.py
           python -m py_compile okx_quant/meta_decision.py
           python -m py_compile okx_quant/market_regime.py
           python -m py_compile okx_quant/backtest.py
@@ -62,6 +63,10 @@ jobs:
           python -m py_compile okx_quant/weekly_learning.py
           python -m py_compile okx_quant/audit_strategy_performance.py
           python -m py_compile okx_quant/audit_strategy_oos_performance.py
+
+      - name: Run Signal Quality Score tests
+        working-directory: zied-source
+        run: python -m pytest -q okx_quant/test_signal_quality.py
 
       - name: Run AI champion promotion tests
         working-directory: zied-source
