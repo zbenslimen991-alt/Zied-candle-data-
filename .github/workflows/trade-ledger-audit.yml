@@ -6,6 +6,7 @@ on:
     paths:
       - "okx_quant/audit_trade_ledger.py"
       - "tests/test_trade_ledger_audit.py"
+      - "scripts/validate_candles.py"
       - ".github/workflows/trade-ledger-audit.yml"
 
 permissions:
