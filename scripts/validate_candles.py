@@ -63,6 +63,7 @@ def normalize_row(row):
 def validate_file(path: Path, timeframe: str):
     issues = Counter()
     timestamps = []
+    gaps = []
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -109,6 +110,8 @@ def validate_file(path: Path, timeframe: str):
                 issues["timestamps_out_of_order"] += 1
             elif ts - previous > BAR_MS[timeframe] * 1.5:
                 issues["candle_time_gaps"] += 1
+                delta_ms = ts - previous
+                gaps.append({"previousTimestamp": previous, "previousUtc": datetime.fromtimestamp(previous / 1000, timezone.utc).isoformat(), "nextTimestamp": ts, "nextUtc": datetime.fromtimestamp(ts / 1000, timezone.utc).isoformat(), "deltaMs": delta_ms, "expectedIntervalMs": BAR_MS[timeframe], "estimatedMissingCandles": max(0, round(delta_ms / BAR_MS[timeframe]) - 1)})
         previous = ts
         o, h, low, close = (finite(normalized[k]) for k in ("open", "high", "low", "close"))
         if any(v is None or v <= 0 for v in (o, h, low, close)):
@@ -127,6 +130,7 @@ def validate_file(path: Path, timeframe: str):
         "file": str(path), "instrument": inst_id, "timeframe": timeframe,
         "rows": len(rows), "firstTimestamp": min(timestamps) if timestamps else None,
         "lastTimestamp": max(timestamps) if timestamps else None, "issues": dict(issues),
+        "gapDetails": gaps,
     }
 
 def main():
@@ -154,8 +158,11 @@ def main():
         if not found_by_timeframe[timeframe]:
             missing_timeframes.append(timeframe)
     totals = Counter()
+    gap_files = []
     for report in reports:
         totals.update(report.get("issues", {}))
+        for gap in report.get("gapDetails", []):
+            gap_files.append({"file": report.get("file"), "instrument": report.get("instrument"), "timeframe": report.get("timeframe"), **gap})
     if missing_timeframes:
         totals["missing_timeframe_dataset"] += len(missing_timeframes)
     result = {
@@ -164,6 +171,7 @@ def main():
         "filesChecked": len(reports), "rowsChecked": sum(x.get("rows", 0) for x in reports),
         "filesByTimeframe": dict(found_by_timeframe),
         "missingTimeframes": missing_timeframes, "issueTotals": dict(totals),
+        "gapCount": len(gap_files), "gapDetails": gap_files,
         "status": "PASS" if not totals else "FAIL", "files": reports,
     }
     OUTPUT.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
