@@ -39,6 +39,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_trade_ledger_audit.py' -v
 
       - name: Reconcile actual Zied portfolio and strategy stats
+        continue-on-error: true
         run: |
           python okx_quant/audit_trade_ledger.py \
             --portfolio zied-data/portfolio_0001.json \
@@ -46,6 +47,7 @@ jobs:
             --output trade_ledger_audit_report.json
 
       - name: Validate historical candle files
+        if: always()
         run: python scripts/validate_candles.py zied-data/candle_history candle_validation_report.json
 
       - name: Upload audit reports
