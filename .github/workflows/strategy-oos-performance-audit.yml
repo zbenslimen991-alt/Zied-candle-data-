@@ -1,0 +1,59 @@
+name: Strategy OOS Performance Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_index:
+        description: Zero-based symbol offset for a resumable batch
+        required: false
+        default: '0'
+      max_symbols:
+        description: Symbols to evaluate in this batch
+        required: false
+        default: '1'
+      candles:
+        description: Latest 1H candles per symbol
+        required: false
+        default: '1000'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: zbenslimen991-alt/Zied
+          token: ${{ secrets.APP_REPO_TOKEN }}
+          path: zied-source
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: candle-data
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        working-directory: zied-source
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+      - name: Compile audit modules
+        working-directory: zied-source
+        run: python -m py_compile okx_quant/candle_store.py okx_quant/backtest.py okx_quant/audit_strategy_oos_performance.py
+      - name: Run OOS batch
+        working-directory: zied-source
+        run: |
+          set -euo pipefail
+          python okx_quant/audit_strategy_oos_performance.py --history-dir candle_history/1H --start-index '${{ inputs.start_index || '0' }}' --max-symbols '${{ inputs.max_symbols || '1' }}' --candles '${{ inputs.candles || '1000' }}' --output strategy_oos_performance_audit.json
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strategy-oos-batch-${{ inputs.start_index || '0' }}
+          path: zied-source/strategy_oos_performance_audit.json
+          if-no-files-found: ignore
+          retention-days: 30
