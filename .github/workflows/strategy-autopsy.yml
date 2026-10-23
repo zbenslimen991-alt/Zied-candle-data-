@@ -99,3 +99,5 @@ jobs:
             zied-source/signal_quality_historical_audit.json
           if-no-files-found: ignore
           retention-days: 30
+
+# Re-run audit after historical candle repair; this comment does not change audit logic.
