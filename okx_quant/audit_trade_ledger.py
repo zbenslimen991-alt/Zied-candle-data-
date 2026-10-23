@@ -81,7 +81,10 @@ def audit(portfolio, stats):
             token = str(trade_id)
             if token in seen_ids:
                 duplicate_ids += 1
+                issues["duplicate_trade_id"] += 1
             seen_ids.add(token)
+        else:
+            issues["missing_trade_id"] += 1
 
         entry = number(first_value(row, PRICE_KEYS["entry"]))
         exit_price = number(first_value(row, PRICE_KEYS["exit"]))
