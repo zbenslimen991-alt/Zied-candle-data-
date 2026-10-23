@@ -73,6 +73,7 @@ jobs:
 
           print(f"[Daily H1 Refresh] eligible_pairs={len(pairs)}")
           failures = []
+          skipped_no_history = []
           refreshed = 0
 
           def refresh(pair):
@@ -81,7 +82,10 @@ jobs:
                   raise ValueError("instrument has no instId")
               df, added, last_ts = update_historical_candles(inst_id)
               if df is None or df.empty or last_ts is None:
-                  raise RuntimeError(f"no usable H1 candles persisted for {inst_id}")
+                  # A small number of live-listed instruments may have no
+                  # history on OKX yet. Treat these as unavailable, not as a
+                  # failed refresh for every other pair.
+                  return inst_id, 0, 0, None
               return inst_id, len(df), added, last_ts
 
           # Bounded concurrency reduces run time while keeping API pressure limited.
@@ -91,14 +95,20 @@ jobs:
                   pair = futures[future]
                   try:
                       inst_id, count, added, last_ts = future.result()
-                      refreshed += 1
-                      print(f"[Daily H1 Refresh] {inst_id}: candles={count} added={added} last_ts={last_ts}")
+                      if count == 0 and last_ts is None:
+                          skipped_no_history.append(inst_id)
+                          print(f"[Daily H1 Refresh] SKIP {inst_id}: OKX has no usable H1 candle history")
+                      else:
+                          refreshed += 1
+                          print(f"[Daily H1 Refresh] {inst_id}: candles={count} added={added} last_ts={last_ts}")
                   except Exception as exc:
                       inst_id = pair.get("instId", "UNKNOWN")
                       failures.append({"instId": inst_id, "error": str(exc)[:200]})
                       print(f"[Daily H1 Refresh] ERROR {inst_id}: {exc}")
 
-          print(f"[Daily H1 Refresh Summary] refreshed={refreshed}/{len(pairs)} failed={len(failures)}")
+          print(f"[Daily H1 Refresh Summary] refreshed={refreshed}/{len(pairs)} skipped_no_history={len(skipped_no_history)} failed={len(failures)}")
+          if skipped_no_history:
+              print(f"[Daily H1 Refresh Skipped] {skipped_no_history[:20]}")
           if failures:
               print(f"[Daily H1 Refresh Failures] {failures[:20]}")
               raise SystemExit(f"{len(failures)} H1 pair refresh(es) failed; audit must not be treated as fully fresh.")
