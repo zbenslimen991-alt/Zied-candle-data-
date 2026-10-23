@@ -6,10 +6,12 @@ import requests
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
-OWNER = "zbenslimen991-alt"
-REPO = "Zied"
+APP_REPO = os.environ["APP_REPO"].strip()
+if "/" not in APP_REPO:
+    raise RuntimeError("APP_REPO must be in owner/repository format, e.g. zbenslimen991-alt/Zied")
+OWNER, REPO = APP_REPO.split("/", 1)
 SHEET_ID = os.environ["GOOGLE_SHEET_ID"]
-TOKEN = os.environ["ZIED_READ_TOKEN"]
+TOKEN = os.environ["APP_REPO_TOKEN"]
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 def fetch_json(path):
@@ -23,7 +25,7 @@ def fetch_json(path):
             detail = r.json().get("message", "No API error message returned")
         except ValueError:
             detail = (r.text or "No response body")[:300]
-        raise RuntimeError(f"GitHub read failed for {path}: HTTP {r.status_code}; reason: {detail}. Check ZIED_READ_TOKEN access to private repository {OWNER}/{REPO} and Contents: Read-only permission.")
+        raise RuntimeError(f"GitHub read failed for {path}: HTTP {r.status_code}; reason: {detail}. Check APP_REPO_TOKEN access to {OWNER}/{REPO} and Contents: Read-only permission.")
     obj = r.json()
     return json.loads(base64.b64decode(obj["content"]).decode("utf-8-sig"))
 
@@ -77,7 +79,7 @@ def build_data():
         [(x.get("timestamp",""),x.get("notificationType",""),x.get("publicNotification",""),x.get("dedupeKey","")) for x in (signals if isinstance(signals,list) else [])[-300:] if isinstance(x,dict)]),
       "Backtest Summary": tab(["Instrument","Trades","Wins","Losses","Win Rate","Profit Factor","Average Return","Max Drawdown","Sharpe Ratio","OOS Trades","Positive OOS Window Rate","Data Quality","Updated"], backtests),
       "AI Learning": [["Metric","Value"]] + [[safe(k),safe(v)] for k,v in metrics.items()] + [["Last run",safe(tuning.get("lastRun",""))],["Window trades",safe(tuning.get("windowTrades",""))]],
-      "Data Status": [["Item","Value"],["Source","Private Zied repository via read-only API"],["Refresh UTC",datetime.now(timezone.utc).isoformat(timespec="seconds")],["Mode","Read-only dashboard export; no trading logic changes"]],
+      "Data Status": [["Item","Value"],["Source",f"Repository {APP_REPO} via read-only API"],["Refresh UTC",datetime.now(timezone.utc).isoformat(timespec="seconds")],["Mode","Read-only dashboard export; no trading logic changes"]],
     }
 
 def main():
