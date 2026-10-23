@@ -227,7 +227,7 @@ def main():
         "perStrategyStatsMismatches": len(report["perStrategyStatsMismatches"]),
         "qualityIssues": report["qualityIssues"], "readOnly": True,
     }, ensure_ascii=False))
-    return 1 if report["reasonReconciliation"]["status"] != "MATCH" or report["qualityIssues"] or report["pnlReconciliation"]["status"] != "MATCH_OR_INCOMPLETE" else 0
+    return 1 if report["reasonReconciliation"]["status"] != "MATCH" or report["qualityIssues"] or report["pnlReconciliation"]["status"] != "MATCH" else 0
 
 if __name__ == "__main__":
     raise SystemExit(main())
