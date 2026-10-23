@@ -30,8 +30,9 @@ class TradeLedgerAuditTests(unittest.TestCase):
         self.assertEqual(result["qualityIssues"], {})
 
     def test_flags_missing_strategy_prices_pnl_and_reason(self):
+        # This fixture intentionally omits all trade metadata so each quality check is exercised.
         result = module.audit(
-            {"closedPositions": [{"entryPrice": 10}]},
+            {"closedPositions": [{}]},
             {"A": {"trades": 0, "tpHits": 0, "slHits": 0, "timeHits": 0}},
         )
         self.assertEqual(result["reasonReconciliation"]["status"], "MISMATCH")
