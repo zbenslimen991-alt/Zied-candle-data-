@@ -1,0 +1,53 @@
+name: Closed Trade Ledger Audit
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "okx_quant/audit_trade_ledger.py"
+      - "tests/test_trade_ledger_audit.py"
+      - ".github/workflows/trade-ledger-audit.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Zied-candle-data
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Checkout private Zied data repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.APP_REPO }}
+          token: ${{ secrets.APP_REPO_TOKEN }}
+          path: zied-data
+
+      - name: Compile audit and tests
+        run: python -m py_compile okx_quant/audit_trade_ledger.py tests/test_trade_ledger_audit.py
+
+      - name: Run audit unit tests
+        run: python -m unittest discover -s tests -p 'test_trade_ledger_audit.py' -v
+
+      - name: Reconcile actual Zied portfolio and strategy stats
+        run: |
+          python okx_quant/audit_trade_ledger.py \
+            --portfolio zied-data/portfolio_0001.json \
+            --stats zied-data/strategy_stats_0001.json \
+            --output trade_ledger_audit_report.json
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: closed-trade-ledger-audit
+          path: trade_ledger_audit_report.json
+          if-no-files-found: ignore
