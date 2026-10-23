@@ -49,6 +49,9 @@ jobs:
         working-directory: zied-source
         run: |
           python -m py_compile okx_quant/config.py
+          python -m py_compile okx_quant/github_sync.py
+          python -m py_compile okx_quant/state.py
+          python -m py_compile okx_quant/storage_rotation.py
           python -m py_compile okx_quant/analyze_coin.py
           python -m py_compile okx_quant/signal_quality.py
           python -m py_compile okx_quant/meta_decision.py
@@ -64,6 +67,10 @@ jobs:
           python -m py_compile okx_quant/audit_strategy_performance.py
           python -m py_compile okx_quant/audit_signal_quality_historical.py
           python -m py_compile okx_quant/audit_strategy_oos_performance.py
+
+      - name: Run scanner regression tests
+        working-directory: zied-source
+        run: python -m pytest -q test_okx_quant_scanner.py
 
       - name: Run Signal Quality Score tests
         working-directory: zied-source
@@ -108,4 +115,4 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-# Re-run audit after historical candle repair; this comment does not change audit logic.
+# Regression checks formerly run in Zied now run here with the existing audits, avoiding duplicate workflow usage in Zied.
