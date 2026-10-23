@@ -31,8 +31,8 @@ jobs:
           token: ${{ secrets.APP_REPO_TOKEN }}
           path: zied-data
 
-      - name: Compile audit and tests
-        run: python -m py_compile okx_quant/audit_trade_ledger.py tests/test_trade_ledger_audit.py
+      - name: Compile audit, candle validator, and tests
+        run: python -m py_compile okx_quant/audit_trade_ledger.py scripts/validate_candles.py tests/test_trade_ledger_audit.py
 
       - name: Run audit unit tests
         run: python -m unittest discover -s tests -p 'test_trade_ledger_audit.py' -v
@@ -44,10 +44,15 @@ jobs:
             --stats zied-data/strategy_stats_0001.json \
             --output trade_ledger_audit_report.json
 
-      - name: Upload audit report
+      - name: Validate historical candle files
+        run: python scripts/validate_candles.py candle_history candle_validation_report.json
+
+      - name: Upload audit reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: closed-trade-ledger-audit
-          path: trade_ledger_audit_report.json
+          path: |
+            trade_ledger_audit_report.json
+            candle_validation_report.json
           if-no-files-found: ignore
