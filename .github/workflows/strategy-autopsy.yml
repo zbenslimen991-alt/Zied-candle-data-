@@ -20,7 +20,7 @@ concurrency:
 jobs:
   regression-and-autopsy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - name: Checkout candle-data repository
         uses: actions/checkout@v4
@@ -85,6 +85,12 @@ jobs:
         working-directory: zied-source
         run: python okx_quant/audit_strategy_performance.py
 
+      - name: Evaluate all enabled strategies with walk-forward out-of-sample backtests
+        working-directory: zied-source
+        run: |
+          set -o pipefail
+          python okx_quant/audit_strategy_oos_performance.py --max-symbols 20 --candles 1500 --output strategy_oos_performance_audit.json 2>&1 | tee "${RUNNER_TEMP}/strategy-oos-audit.log"
+
       - name: Evaluate historical signal quality against closed trades
         working-directory: zied-source
         run: python okx_quant/audit_signal_quality_historical.py
@@ -97,6 +103,8 @@ jobs:
           path: |
             zied-source/strategy_performance_audit.json
             zied-source/signal_quality_historical_audit.json
+            zied-source/strategy_oos_performance_audit.json
+            ${RUNNER_TEMP}/strategy-oos-audit.log
           if-no-files-found: ignore
           retention-days: 30
 
