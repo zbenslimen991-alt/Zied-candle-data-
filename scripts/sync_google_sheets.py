@@ -19,7 +19,11 @@ def fetch_json(path):
         timeout=45,
     )
     if r.status_code != 200:
-        raise RuntimeError(f"GitHub read failed for {path}: HTTP {r.status_code}")
+        try:
+            detail = r.json().get("message", "No API error message returned")
+        except ValueError:
+            detail = (r.text or "No response body")[:300]
+        raise RuntimeError(f"GitHub read failed for {path}: HTTP {r.status_code}; reason: {detail}. Check ZIED_READ_TOKEN access to private repository {OWNER}/{REPO} and Contents: Read-only permission.")
     obj = r.json()
     return json.loads(base64.b64decode(obj["content"]).decode("utf-8-sig"))
 
