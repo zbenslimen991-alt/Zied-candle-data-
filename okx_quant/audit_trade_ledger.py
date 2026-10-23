@@ -129,6 +129,11 @@ def audit(portfolio, stats):
         ledger_by_strategy[label]["pnlSum"] += pnl if pnl is not None else 0.0
         details.append({
             "index": index, "tradeId": trade_id, "strategy": label, "reason": reason,
+            "instId": first_value(row, ("instId", "instrument", "symbol", "pair")),
+            "openTimestamp": first_value(row, ("openTime", "openedAt", "entryTime", "entryTimestamp", "createdAt", "timestamp")),
+            "closeTimestamp": first_value(row, ("closeTime", "closedAt", "exitTime", "exitTimestamp", "closedTimestamp")),
+            "entryPrice": entry, "exitPrice": exit_price, "quantity": quantity,
+            "storedPnl": pnl, "fee": fee,
             "entryPricePresent": entry is not None and entry > 0,
             "exitPricePresent": exit_price is not None and exit_price > 0,
             "quantityPresent": quantity is not None and quantity > 0,
