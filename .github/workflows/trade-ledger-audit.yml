@@ -46,7 +46,7 @@ jobs:
             --output trade_ledger_audit_report.json
 
       - name: Validate historical candle files
-        run: python scripts/validate_candles.py candle_history candle_validation_report.json
+        run: python scripts/validate_candles.py zied-data/candle_history candle_validation_report.json
 
       - name: Upload audit reports
         if: always()
