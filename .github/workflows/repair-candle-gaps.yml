@@ -44,6 +44,9 @@ jobs:
       - name: Validate repaired candle history
         run: python scripts/validate_candles.py zied-data/candle_history candle_validation_report.json
 
+      - name: Validate closed-trade ledger after VWAP reconciliation
+        run: python okx_quant/audit_trade_ledger.py --portfolio zied-data/portfolio_0001.json --stats zied-data/strategy_stats_0001.json --output trade_ledger_audit_report.json
+
       - name: Commit verified candle repairs to private Zied
         run: |
           git -C zied-data config user.name "github-actions[bot]"
@@ -61,5 +64,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: repaired-candle-validation
-          path: candle_validation_report.json
+          path: |
+            candle_validation_report.json
+            trade_ledger_audit_report.json
           if-no-files-found: ignore
