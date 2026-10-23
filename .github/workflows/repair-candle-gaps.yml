@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - "scripts/repair_candle_gaps.py"
+      - "scripts/reconcile_vwap_stats.py"
       - ".github/workflows/repair-candle-gaps.yml"
 
 permissions:
@@ -37,6 +38,9 @@ jobs:
       - name: Repair missing 15m candles from OKX
         run: python scripts/repair_candle_gaps.py
 
+      - name: Reconcile VWAP_RECLAIM stats without changing weights or risk parameters
+        run: python scripts/reconcile_vwap_stats.py zied-data/portfolio_0001.json zied-data/strategy_stats_0001.json
+
       - name: Validate repaired candle history
         run: python scripts/validate_candles.py zied-data/candle_history candle_validation_report.json
 
@@ -44,12 +48,12 @@ jobs:
         run: |
           git -C zied-data config user.name "github-actions[bot]"
           git -C zied-data config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ -z "$(git -C zied-data status --porcelain -- candle_history/15m)" ]; then
+          if [ -z "$(git -C zied-data status --porcelain -- candle_history/15m strategy_stats_0001.json)" ]; then
             echo "No candle files changed; nothing to commit."
             exit 0
           fi
-          git -C zied-data add candle_history/15m
-          git -C zied-data commit -m "Repair missing historical 15m OKX candles"
+          git -C zied-data add candle_history/15m strategy_stats_0001.json
+          git -C zied-data commit -m "Repair historical 15m candles and reconcile VWAP stats"
           git -C zied-data push origin HEAD
 
       - name: Upload candle validation report
