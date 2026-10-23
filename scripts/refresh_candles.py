@@ -157,7 +157,11 @@ def update_pair(inst: str, bar: str):
         recent = fetch_latest_candles(inst, bar)
         merged.update(recent)
     if not merged:
-        raise RuntimeError("OKX returned no candles")
+        # Some live-listed instruments can temporarily return no candle rows
+        # from OKX. Do not create an empty file or fail the entire refresh;
+        # report this pair separately and preserve any existing file unchanged.
+        print(f"[{bar}] SKIP {inst}: OKX returned no candles and no stored history exists")
+        return 0
     payload = candle_payload(inst, bar, merged)
     path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = path.with_suffix(path.suffix + ".tmp")
@@ -178,6 +182,7 @@ def main():
     for bar in BARS:
         failures = []
         updated = 0
+        skipped_no_history = []
         started = time.monotonic()
         print(f"Starting {bar}: {len(instruments)} live Spot/USDT pairs, target={TARGET}")
         with ThreadPoolExecutor(max_workers=WORKERS) as pool:
@@ -186,13 +191,19 @@ def main():
                 inst = futures[future]
                 try:
                     count = future.result()
-                    updated += 1
-                    print(f"[{bar} {done}/{len(instruments)}] {inst}: {count} candles")
+                    if count == 0:
+                        skipped_no_history.append(inst)
+                        print(f"[{bar} {done}/{len(instruments)}] SKIP {inst}: no candles available")
+                    else:
+                        updated += 1
+                        print(f"[{bar} {done}/{len(instruments)}] {inst}: {count} candles")
                 except Exception as exc:
                     failures.append({"instId": inst, "bar": bar, "error": str(exc)})
                     print(f"[{bar} {done}/{len(instruments)}] ERROR {inst}: {exc}")
         overall["timeframes"][bar] = {
             "eligible_pairs": len(instruments), "updated_pairs": updated,
+            "skipped_no_history_pairs": len(skipped_no_history),
+            "skipped_no_history": skipped_no_history,
             "failed_pairs": len(failures),
             "elapsed_seconds": round(time.monotonic() - started, 2)
         }
