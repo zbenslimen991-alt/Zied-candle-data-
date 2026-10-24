@@ -237,10 +237,15 @@ def build_data(tree):
         candle_bytes[interval] += size
         candle_rows.append([path, interval, filename, pair, size, round(size / 1048576, 3), kind, f.get("sha", "")])
 
+    # Preserve every non-candle JSON data file losslessly as chunked JSON text.
+    # Flattening large analysis-memory files creates excessive repeated metadata and
+    # exceeds the Sheets write quota; the dashboard tabs above provide readable views.
     raw_rows = []
     for path in sorted(json_data):
-        for json_path, value_type, value, chunk_no in flatten_json(json_data[path]):
-            raw_rows.append([path, json_path, value_type, safe(value), chunk_no])
+        serialized = json.dumps(json_data[path], ensure_ascii=False, separators=(",", ":"))
+        chunks = [serialized[i:i + MAX_CELL_CHARS] for i in range(0, len(serialized), MAX_CELL_CHARS)] or [""]
+        for chunk_no, chunk in enumerate(chunks, 1):
+            raw_rows.append([path, chunk_no, len(chunks), len(serialized), safe(chunk)])
 
     candle_summary = [["Interval Folder", "Files", "Total Size MB"]]
     for interval in sorted(candle_counts):
@@ -262,9 +267,9 @@ def build_data(tree):
         ["Total strategy losses", total_losses], ["Overall strategy win rate %", overall_win_rate],
         ["Backtest instruments", len(backtests)], ["Non-candle JSON files exported", len(json_files)],
         ["All repository files inventoried", len(tree)], ["Historical candle files inventoried", len(candle_files)],
-        ["Raw JSON data rows exported", len(raw_rows)],
+        ["Raw JSON chunks exported", len(raw_rows)],
         ["AI tuning last run", tuning_last],
-        ["Scope note", "All non-candle JSON data is expanded into Raw Data. All repository files and 3,765 historical candle files are indexed. Raw candle arrays remain in the source repo to respect Google Sheets workbook limits."]],
+        ["Scope note", "All non-candle JSON data is preserved as chunked JSON in Raw Data, with readable dashboard tabs for key records. All repository files and historical candle files are indexed. Raw candle arrays remain in the source repo to respect Google Sheets workbook limits."]],
       "Open Positions": records_table(opened),
       "Pending Orders": records_table(pending),
       "Closed Positions": records_table(closed),
@@ -276,12 +281,12 @@ def build_data(tree):
       "Candle Summary": candle_summary,
       "Candle Catalog": tab(["Repository Path","Interval Folder","File Name","Pair / Symbol","Size Bytes","Size MB","File Type","Git Blob SHA"], candle_rows),
       "Repository Files": tab(["Path","Top-level Folder","Extension","Size Bytes","Size MB","Category","Git Blob SHA"], inventory_rows),
-      "Raw Data": tab(["Source JSON File","JSON Pointer","Value Type","Value / Chunk","Chunk Number"], raw_rows),
+      "Raw Data": tab(["Source JSON File","Chunk Index","Total Chunks","JSON Characters","JSON Data Chunk"], raw_rows),
       "Data Status": [["Item","Value"],
         ["Source",f"Private repository {APP_REPO} via read-only GitHub API"],
         ["Refresh UTC",datetime.now(timezone.utc).isoformat(timespec="seconds")],
         ["Repository files inventoried",len(tree)],["Non-candle JSON files fully exported",len(json_files)],
-        ["Candle/history files cataloged",len(candle_files)],["Raw JSON leaf/chunk rows",len(raw_rows)],
+        ["Candle/history files cataloged",len(candle_files)],["Raw JSON chunks",len(raw_rows)],
         ["Mode","Read-only dashboard export; no trading logic changes"],
         ["Historical candle data","Indexed by file; raw candle arrays remain in the private repository due Google Sheets size limits"]],
       "Charts": [["Strategy", "Trades"]] + [[row[0], row[1]] for row in strategies[:10]] + [["", ""], ["Outcome", "Count"], ["Wins", total_wins], ["Losses", total_losses]],
