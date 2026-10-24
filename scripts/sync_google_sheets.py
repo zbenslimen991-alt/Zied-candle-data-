@@ -20,8 +20,8 @@ TOKEN = os.environ["APP_REPO_TOKEN"]
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 GH_HEADERS = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github+json"}
 MAX_CELL_CHARS = 40000
-MAX_BATCH_BYTES = 900000
-MAX_BATCH_ROWS = 1000
+MAX_BATCH_BYTES = 1500000
+MAX_BATCH_ROWS = 2000
 
 
 def execute_with_retry(request, attempts=6):
