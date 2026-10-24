@@ -25,7 +25,7 @@ jobs:
         with:
           repository: zbenslimen991-alt/Zied
           ref: main
-          token: ${{ secrets.ZIED_READ_TOKEN }}
+          token: ${{ secrets.APP_REPO_TOKEN }}
           path: zied-source
           sparse-checkout: |
             portfolio_0001.json
