@@ -101,7 +101,17 @@ def main():
     api.spreadsheets().values().batchClear(spreadsheetId=SHEET_ID, body={"ranges":[f"'{name}'!A:Z" for name in data]}).execute()
     updates = [{"range":f"'{name}'!A1","majorDimension":"ROWS","values":rows} for name,rows in data.items()]
     api.spreadsheets().values().batchUpdate(spreadsheetId=SHEET_ID, body={"valueInputOption":"RAW","data":updates}).execute()
-    print("Google Sheets dashboard sync succeeded:", ", ".join(data))
+    meta = api.spreadsheets().get(spreadsheetId=SHEET_ID, fields="sheets(properties(sheetId,title),charts(chartId))").execute()
+    chart_sheet = next(x for x in meta["sheets"] if x["properties"]["title"] == "Charts")
+    chart_sheet_id = chart_sheet["properties"]["sheetId"]
+    delete_requests = [{"deleteEmbeddedObject":{"objectId":x["chartId"]}} for x in chart_sheet.get("charts", [])]
+    if delete_requests: api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":delete_requests}).execute()
+    charts = [
+      {"addChart":{"chart":{"spec":{"title":"Top 10 Strategies by Number of Trades","basicChart":{"chartType":"BAR","legendPosition":"NO_LEGEND","headerCount":1,"domains":[{"domain":{"sourceRange":{"sources":[{"sheetId":chart_sheet_id,"startRowIndex":0,"endRowIndex":11,"startColumnIndex":0,"endColumnIndex":1}]}}}],"series":[{"series":{"sourceRange":{"sources":[{"sheetId":chart_sheet_id,"startRowIndex":0,"endRowIndex":11,"startColumnIndex":1,"endColumnIndex":2}]}},"targetAxis":"BOTTOM_AXIS"}],"axis":[{"position":"BOTTOM_AXIS","title":"Trades"},{"position":"LEFT_AXIS","title":"Strategy"}]}},"position":{"overlayPosition":{"anchorCell":{"sheetId":chart_sheet_id,"rowIndex":0,"columnIndex":6},"widthPixels":720,"heightPixels":360}}}}},
+      {"addChart":{"chart":{"spec":{"title":"Wins vs Losses","pieChart":{"legendPosition":"RIGHT_LEGEND","threeDimensional":False,"domain":{"sourceRange":{"sources":[{"sheetId":chart_sheet_id,"startRowIndex":12,"endRowIndex":15,"startColumnIndex":0,"endColumnIndex":1}]}},"series":{"sourceRange":{"sources":[{"sheetId":chart_sheet_id,"startRowIndex":12,"endRowIndex":15,"startColumnIndex":1,"endColumnIndex":2}]}}}},"position":{"overlayPosition":{"anchorCell":{"sheetId":chart_sheet_id,"rowIndex":20,"columnIndex":6},"widthPixels":600,"heightPixels":360}}}}}
+    ]
+    api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":charts}).execute()
+    print("Google Sheets dashboard sync succeeded with totals and charts:", ", ".join(data))
 
 if __name__ == "__main__":
     main()
