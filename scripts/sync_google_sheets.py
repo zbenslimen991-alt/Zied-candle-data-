@@ -190,9 +190,8 @@ def build_data(tree):
     overall_win_rate = round(total_wins * 100 / total_trades, 2) if total_trades else 0
 
     # Index only storage JSON files; do not export source code or candle-history files.
-    storage_rows = [["Storage JSON Path", "Size Bytes", "Size MB", "Git Blob SHA"]]
-    storage_rows.extend([[x["path"], x.get("size", 0), round(x.get("size", 0) / 1048576, 3), x.get("sha", "")]
-                         for x in sorted(json_files, key=lambda item: item["path"].lower())])
+    storage_rows = [[x["path"], x.get("size", 0), round(x.get("size", 0) / 1048576, 3), x.get("sha", "")]
+                    for x in sorted(json_files, key=lambda item: item["path"].lower())]
 
     # Preserve every non-candle JSON data file losslessly as chunked JSON text.
     # Flattening large analysis-memory files creates excessive repeated metadata and
