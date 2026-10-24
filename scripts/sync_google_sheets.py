@@ -51,6 +51,14 @@ def fetch_json(path, file_index):
     return json.loads(raw)
 
 
+def column_letter(n):
+    result = ""
+    while n:
+        n, remainder = divmod(n - 1, 26)
+        result = chr(65 + remainder) + result
+    return result
+
+
 def safe(v):
     if v is None:
         return ""
@@ -352,7 +360,7 @@ def main():
     # Clear the tabs first so stale rows disappear when a data source shrinks.
     api.spreadsheets().values().batchClear(
         spreadsheetId=SHEET_ID,
-        body={"ranges":[f"'{name}'!A:{chr(64 + max(1, (7 if name == 'Charts' else max((len(row) for row in rows), default=1))))}" for name, rows in data.items()]}
+        body={"ranges":[f"'{name}'!A:{column_letter(max(1, (7 if name == 'Charts' else max((len(row) for row in rows), default=1))))}" for name, rows in data.items()]}
     ).execute()
     for name, rows in data.items():
         write_sheet_in_chunks(api, SHEET_ID, name, rows)
