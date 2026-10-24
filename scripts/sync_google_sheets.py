@@ -321,7 +321,7 @@ def main():
       {"addChart":{"chart":{"spec":{"title":"Top 10 Strategies by Number of Trades",
         "basicChart":{"chartType":"BAR","legendPosition":"NO_LEGEND","headerCount":1,
           "domains":[{"domain":{"sourceRange":{"sources":[{"sheetId":chart_sheet_id,"startRowIndex":0,"endRowIndex":11,"startColumnIndex":0,"endColumnIndex":1}]}}}],
-          "series":[{"series":{"sourceRange":{"sources":[{"sheetId":chart_sheet_id,"startRowIndex":0,"endRowIndex":11,"startColumnIndex":1,"endColumnIndex":2}]},"targetAxis":"BOTTOM_AXIS"}],
+          "series":[{"series":{"sourceRange":{"sources":[{"sheetId":chart_sheet_id,"startRowIndex":0,"endRowIndex":11,"startColumnIndex":1,"endColumnIndex":2}]}},"targetAxis":"BOTTOM_AXIS"}],
           "axis":[{"position":"BOTTOM_AXIS","title":"Trades"},{"position":"LEFT_AXIS","title":"Strategy"}]}},
         "position":{"overlayPosition":{"anchorCell":{"sheetId":chart_sheet_id,"rowIndex":0,"columnIndex":6},"widthPixels":720,"heightPixels":360}}}}},
       {"addChart":{"chart":{"spec":{"title":"Wins vs Losses",
