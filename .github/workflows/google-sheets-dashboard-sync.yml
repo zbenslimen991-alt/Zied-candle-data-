@@ -3,7 +3,7 @@ name: Google Sheets Dashboard Sync
 on:
   workflow_dispatch:
   schedule:
-    - cron: "7,37 * * * *"
+    - cron: "*/15 * * * *"
 
 permissions:
   contents: read
