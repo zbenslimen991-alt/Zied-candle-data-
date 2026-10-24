@@ -1,6 +1,7 @@
 import base64
 import json
 import os
+import time
 from collections import Counter
 from datetime import datetime, timezone
 from urllib.parse import quote
@@ -8,6 +9,7 @@ from urllib.parse import quote
 import requests
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 APP_REPO = os.environ["APP_REPO"].strip()
 if "/" not in APP_REPO:
@@ -19,6 +21,19 @@ SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 GH_HEADERS = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.github+json"}
 MAX_CELL_CHARS = 40000
 MAX_BATCH_BYTES = 900000
+MAX_BATCH_ROWS = 1000
+
+
+def execute_with_retry(request, attempts=6):
+    for attempt in range(attempts):
+        try:
+            return request.execute()
+        except HttpError as exc:
+            if exc.resp.status not in (429, 500, 502, 503, 504) or attempt == attempts - 1:
+                raise
+            delay = min(30, 2 ** attempt)
+            print(f"Google API returned HTTP {exc.resp.status}; retrying in {delay}s.")
+            time.sleep(delay)
 
 
 def github_get(url, timeout=90):
@@ -281,7 +296,7 @@ def write_sheet_in_chunks(api, sheet_id, title, rows):
     for row in rows:
         row = [safe(v) for v in row]
         row_size = len(json.dumps(row, ensure_ascii=False, default=str).encode("utf-8"))
-        if batch and (len(batch) >= 250 or batch_bytes + row_size > MAX_BATCH_BYTES):
+        if batch and (len(batch) >= MAX_BATCH_ROWS or batch_bytes + row_size > MAX_BATCH_BYTES):
             api.spreadsheets().values().update(
                 spreadsheetId=sheet_id, range=f"'{title}'!A{start}",
                 valueInputOption="RAW", body={"majorDimension":"ROWS","values":batch}
