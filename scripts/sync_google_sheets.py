@@ -2,9 +2,7 @@ import base64
 import json
 import os
 import time
-from collections import Counter
 from datetime import datetime, timezone
-from urllib.parse import quote
 
 import requests
 from google.oauth2.service_account import Credentials
@@ -136,7 +134,6 @@ def records_table(items, preferred_headers=None):
 def build_data(tree):
     file_index = {x["path"]: x for x in tree}
     json_files = [x for x in tree if x["path"].lower().endswith(".json") and not x["path"].startswith("candle_history/")]
-    candle_files = [x for x in tree if x["path"].startswith("candle_history/") and x["type"] == "blob"]
     required = [
         "portfolio_0001.json", "strategy_stats_0001.json", "signal_history_0001.json",
         "backtest_results_0001.json", "auto_tuned_config.json"
@@ -192,50 +189,10 @@ def build_data(tree):
     total_losses = sum(row[3] for row in strategies)
     overall_win_rate = round(total_wins * 100 / total_trades, 2) if total_trades else 0
 
-    # A full inventory covers every tracked file, not just JSON files.
-    inventory_rows = []
-    for f in sorted(tree, key=lambda x: x["path"].lower()):
-        path = f["path"]
-        parts = path.split("/")
-        if path.startswith("candle_history/"):
-            category = "Historical candle data"
-        elif path.startswith(".github/workflows/"):
-            category = "Automation workflow"
-        elif path.endswith(".json"):
-            category = "Program data / learning / metrics"
-        elif path.endswith((".py", ".js")):
-            category = "Program source code"
-        elif path.lower().endswith((".md", ".txt", ".yml", ".yaml")):
-            category = "Documentation / configuration"
-        else:
-            category = "Other repository file"
-        inventory_rows.append([path, parts[0] if len(parts) > 1 else "(root)",
-            path.rsplit(".", 1)[-1].lower() if "." in parts[-1] else "(no extension)",
-            f.get("size", 0), round(f.get("size", 0) / 1048576, 3), category, f.get("sha", "")])
-
-    candle_rows = []
-    candle_counts = Counter()
-    candle_bytes = Counter()
-    for f in sorted(candle_files, key=lambda x: x["path"].lower()):
-        path = f["path"]
-        parts = path.split("/")
-        interval = parts[1] if len(parts) > 2 else ""
-        filename = parts[-1]
-        pair = filename
-        for suffix in ("_15m.json", "_1H.json", "_4H.json", "_1D.json"):
-            if pair.endswith(suffix):
-                pair = pair[:-len(suffix)] + "-USDT"
-                break
-        if pair.endswith(".json"):
-            pair = pair[:-5]
-        if pair == "refresh_status":
-            kind = "Refresh status"
-        else:
-            kind = "Candle/history file"
-        size = f.get("size", 0)
-        candle_counts[interval] += 1
-        candle_bytes[interval] += size
-        candle_rows.append([path, interval, filename, pair, size, round(size / 1048576, 3), kind, f.get("sha", "")])
+    # Index only storage JSON files; do not export source code or candle-history files.
+    storage_rows = [["Storage JSON Path", "Size Bytes", "Size MB", "Git Blob SHA"]]
+    storage_rows.extend([[x["path"], x.get("size", 0), round(x.get("size", 0) / 1048576, 3), x.get("sha", "")]
+                         for x in sorted(json_files, key=lambda item: item["path"].lower())])
 
     # Preserve every non-candle JSON data file losslessly as chunked JSON text.
     # Flattening large analysis-memory files creates excessive repeated metadata and
@@ -246,11 +203,6 @@ def build_data(tree):
         chunks = [serialized[i:i + MAX_CELL_CHARS] for i in range(0, len(serialized), MAX_CELL_CHARS)] or [""]
         for chunk_no, chunk in enumerate(chunks, 1):
             raw_rows.append([path, chunk_no, len(chunks), len(serialized), safe(chunk)])
-
-    candle_summary = [["Interval Folder", "Files", "Total Size MB"]]
-    for interval in sorted(candle_counts):
-        candle_summary.append([interval, candle_counts[interval], round(candle_bytes[interval] / 1048576, 2)])
-    candle_summary.append(["TOTAL", sum(candle_counts.values()), round(sum(candle_bytes.values()) / 1048576, 2)])
 
     tuning_last = tuning.get("lastRun", "") if isinstance(tuning, dict) else ""
     return {
@@ -266,10 +218,9 @@ def build_data(tree):
         ["Total strategy trades", total_trades], ["Total strategy wins", total_wins],
         ["Total strategy losses", total_losses], ["Overall strategy win rate %", overall_win_rate],
         ["Backtest instruments", len(backtests)], ["Non-candle JSON files exported", len(json_files)],
-        ["All repository files inventoried", len(tree)], ["Historical candle files inventoried", len(candle_files)],
-        ["Raw JSON chunks exported", len(raw_rows)],
+        ["Storage JSON files exported", len(json_files)], ["Raw JSON chunks exported", len(raw_rows)],
         ["AI tuning last run", tuning_last],
-        ["Scope note", "All non-candle JSON data is preserved as chunked JSON in Raw Data, with readable dashboard tabs for key records. All repository files and historical candle files are indexed. Raw candle arrays remain in the source repo to respect Google Sheets workbook limits."]],
+        ["Scope note", "Only storage JSON files are exported. Candle-history files and program source-code files are excluded. Raw storage JSON is preserved in chunks in Raw Data, with readable dashboard tabs for key records."]],
       "Open Positions": records_table(opened),
       "Pending Orders": records_table(pending),
       "Closed Positions": records_table(closed),
@@ -278,17 +229,14 @@ def build_data(tree):
       "Signal History": records_table(signals if isinstance(signals, list) else []),
       "Backtest Summary": tab(["Instrument","Trades","Wins","Losses","Win Rate","Profit Factor","Average Return","Max Drawdown","Sharpe Ratio","OOS Trades","Positive OOS Window Rate","Data Quality","Updated"], backtests),
       "AI Learning": [["Metric","Value"]] + [[safe(k), safe(v)] for k,v in metrics.items()] + [["Last run",safe(tuning_last)],["Window trades",safe(tuning.get("windowTrades","") if isinstance(tuning,dict) else "")]],
-      "Candle Summary": candle_summary,
-      "Candle Catalog": tab(["Repository Path","Interval Folder","File Name","Pair / Symbol","Size Bytes","Size MB","File Type","Git Blob SHA"], candle_rows),
-      "Repository Files": tab(["Path","Top-level Folder","Extension","Size Bytes","Size MB","Category","Git Blob SHA"], inventory_rows),
+      "Storage Files": tab(["Storage JSON Path","Size Bytes","Size MB","Git Blob SHA"], storage_rows),
       "Raw Data": tab(["Source JSON File","Chunk Index","Total Chunks","JSON Characters","JSON Data Chunk"], raw_rows),
       "Data Status": [["Item","Value"],
         ["Source",f"Private repository {APP_REPO} via read-only GitHub API"],
         ["Refresh UTC",datetime.now(timezone.utc).isoformat(timespec="seconds")],
-        ["Repository files inventoried",len(tree)],["Non-candle JSON files fully exported",len(json_files)],
-        ["Candle/history files cataloged",len(candle_files)],["Raw JSON chunks",len(raw_rows)],
-        ["Mode","Read-only dashboard export; no trading logic changes"],
-        ["Historical candle data","Indexed by file; raw candle arrays remain in the private repository due Google Sheets size limits"]],
+        ["Storage JSON files fully exported",len(json_files)],["Raw JSON chunks",len(raw_rows)],
+        ["Mode","Read-only storage-data export; no trading logic changes"],
+        ["Excluded","Candle-history files and program source-code files"]],
       "Charts": [["Strategy", "Trades"]] + [[row[0], row[1]] for row in strategies[:10]] + [["", ""], ["Outcome", "Count"], ["Wins", total_wins], ["Losses", total_losses]],
     }
 
@@ -341,7 +289,18 @@ def main():
             }}})
     if additions:
         api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":additions}).execute()
-    # Expand existing tabs before writing large inventories and raw JSON exports.
+    # Remove obsolete tabs that previously displayed candle-file inventories or source-code inventory.
+    obsolete_titles = {"Candle Summary", "Candle Catalog", "Repository Files"}
+    obsolete_requests = [{"deleteSheet": {"sheetId": item["properties"]["sheetId"]}}
+                         for item in meta.get("sheets", []) if item["properties"]["title"] in obsolete_titles]
+    if obsolete_requests:
+        api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests": obsolete_requests}).execute()
+        meta = api.spreadsheets().get(
+            spreadsheetId=SHEET_ID,
+            fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))"
+        ).execute()
+        existing = {x["properties"]["title"]: x for x in meta.get("sheets", [])}
+    # Expand existing tabs before writing storage exports.
     meta = api.spreadsheets().get(
         spreadsheetId=SHEET_ID,
         fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))"
@@ -457,7 +416,7 @@ def main():
     ]
     api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":charts}).execute()
     print("Google Sheets full repository-data sync succeeded:", ", ".join(data))
-    print(f"Repository files={len(tree)}; non-candle JSON files fully exported; raw data rows={len(data['Raw Data'])-1}; candle files cataloged={len(data['Candle Catalog'])-1}")
+    print(f"Storage JSON files={len(data['Storage Files'])-1}; raw data chunks={len(data['Raw Data'])-1}; candle-history files excluded.")
 
 
 if __name__ == "__main__":
