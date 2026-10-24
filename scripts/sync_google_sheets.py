@@ -297,11 +297,46 @@ def main():
     info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     api = build("sheets", "v4", credentials=creds, cache_discovery=False)
-    meta = api.spreadsheets().get(spreadsheetId=SHEET_ID).execute()
-    existing = {x["properties"]["title"] for x in meta.get("sheets", [])}
-    additions = [{"addSheet":{"properties":{"title":name}}} for name in data if name not in existing]
+    meta = api.spreadsheets().get(
+        spreadsheetId=SHEET_ID,
+        fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))"
+    ).execute()
+    existing = {x["properties"]["title"]: x for x in meta.get("sheets", [])}
+    additions = []
+    for name, rows in data.items():
+        if name not in existing:
+            needed_rows = max(1000, len(rows) + 10)
+            needed_cols = max(26, max((len(row) for row in rows), default=1))
+            additions.append({"addSheet":{"properties":{
+                "title":name,
+                "gridProperties":{"rowCount":needed_rows,"columnCount":needed_cols}
+            }}})
     if additions:
         api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":additions}).execute()
+    # Expand existing tabs before writing large inventories and raw JSON exports.
+    meta = api.spreadsheets().get(
+        spreadsheetId=SHEET_ID,
+        fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))"
+    ).execute()
+    existing = {x["properties"]["title"]: x for x in meta.get("sheets", [])}
+    resize_requests = []
+    for name, rows in data.items():
+        sheet = existing[name]["properties"]
+        grid = sheet.get("gridProperties", {})
+        needed_rows = max(1000, len(rows) + 10)
+        needed_cols = max(26, max((len(row) for row in rows), default=1))
+        new_grid = {}
+        if grid.get("rowCount", 1000) < needed_rows:
+            new_grid["rowCount"] = needed_rows
+        if grid.get("columnCount", 26) < needed_cols:
+            new_grid["columnCount"] = needed_cols
+        if new_grid:
+            resize_requests.append({"updateSheetProperties":{
+                "properties":{"sheetId":sheet["sheetId"],"gridProperties":new_grid},
+                "fields":",".join(f"gridProperties.{key}" for key in new_grid)
+            }})
+    if resize_requests:
+        api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":resize_requests}).execute()
     # Clear the tabs first so stale rows disappear when a data source shrinks.
     api.spreadsheets().values().batchClear(
         spreadsheetId=SHEET_ID, body={"ranges":[f"'{name}'!A:Z" for name in data]}
