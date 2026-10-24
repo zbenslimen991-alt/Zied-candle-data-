@@ -306,7 +306,7 @@ def main():
     for name, rows in data.items():
         if name not in existing:
             needed_rows = max(1000, len(rows) + 10)
-            needed_cols = max(26, max((len(row) for row in rows), default=1))
+            needed_cols = max(7 if name == "Charts" else 1, max((len(row) for row in rows), default=1))
             additions.append({"addSheet":{"properties":{
                 "title":name,
                 "gridProperties":{"rowCount":needed_rows,"columnCount":needed_cols}
@@ -328,7 +328,7 @@ def main():
         new_grid = {}
         if grid.get("rowCount", 1000) < needed_rows:
             new_grid["rowCount"] = needed_rows
-        if grid.get("columnCount", 26) < needed_cols:
+        if grid.get("columnCount", 26) != needed_cols:
             new_grid["columnCount"] = needed_cols
         if new_grid:
             resize_requests.append({"updateSheetProperties":{
@@ -339,7 +339,8 @@ def main():
         api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":resize_requests}).execute()
     # Clear the tabs first so stale rows disappear when a data source shrinks.
     api.spreadsheets().values().batchClear(
-        spreadsheetId=SHEET_ID, body={"ranges":[f"'{name}'!A:Z" for name in data]}
+        spreadsheetId=SHEET_ID,
+        body={"ranges":[f"'{name}'!A:{chr(64 + max(1, (7 if name == 'Charts' else max((len(row) for row in rows), default=1))))}" for name, rows in data.items()]}
     ).execute()
     for name, rows in data.items():
         write_sheet_in_chunks(api, SHEET_ID, name, rows)
