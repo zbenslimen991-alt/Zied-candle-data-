@@ -297,10 +297,10 @@ def write_sheet_in_chunks(api, sheet_id, title, rows):
         row = [safe(v) for v in row]
         row_size = len(json.dumps(row, ensure_ascii=False, default=str).encode("utf-8"))
         if batch and (len(batch) >= MAX_BATCH_ROWS or batch_bytes + row_size > MAX_BATCH_BYTES):
-            api.spreadsheets().values().update(
+            execute_with_retry(api.spreadsheets().values().update(
                 spreadsheetId=sheet_id, range=f"'{title}'!A{start}",
                 valueInputOption="RAW", body={"majorDimension":"ROWS","values":batch}
-            ).execute()
+            ))
             start += len(batch)
             batch, batch_bytes = [], 0
         if row_size > MAX_BATCH_BYTES:
@@ -308,10 +308,10 @@ def write_sheet_in_chunks(api, sheet_id, title, rows):
         batch.append(row)
         batch_bytes += row_size
     if batch:
-        api.spreadsheets().values().update(
+        execute_with_retry(api.spreadsheets().values().update(
             spreadsheetId=sheet_id, range=f"'{title}'!A{start}",
             valueInputOption="RAW", body={"majorDimension":"ROWS","values":batch}
-        ).execute()
+        ))
 
 
 def main():
