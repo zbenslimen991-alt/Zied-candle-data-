@@ -319,24 +319,36 @@ def main():
         fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))"
     ).execute()
     existing = {x["properties"]["title"]: x for x in meta.get("sheets", [])}
-    resize_requests = []
+    shrink_columns = []
+    expand_rows = []
     for name, rows in data.items():
         sheet = existing[name]["properties"]
         grid = sheet.get("gridProperties", {})
         needed_rows = max(1000, len(rows) + 10)
-        needed_cols = max(26, max((len(row) for row in rows), default=1))
-        new_grid = {}
-        if grid.get("rowCount", 1000) < needed_rows:
-            new_grid["rowCount"] = needed_rows
-        if grid.get("columnCount", 26) != needed_cols:
-            new_grid["columnCount"] = needed_cols
-        if new_grid:
-            resize_requests.append({"updateSheetProperties":{
-                "properties":{"sheetId":sheet["sheetId"],"gridProperties":new_grid},
-                "fields":",".join(f"gridProperties.{key}" for key in new_grid)
+        needed_cols = max(7 if name == "Charts" else 1, max((len(row) for row in rows), default=1))
+        current_cols = grid.get("columnCount", 26)
+        current_rows = grid.get("rowCount", 1000)
+        # Shrink default 26-column grids first; otherwise expanding a long tab can
+        # transiently exceed the workbook-wide 20 million cell limit.
+        if current_cols > needed_cols:
+            shrink_columns.append({"updateSheetProperties":{
+                "properties":{"sheetId":sheet["sheetId"],"gridProperties":{"columnCount":needed_cols}},
+                "fields":"gridProperties.columnCount"
             }})
-    if resize_requests:
-        api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":resize_requests}).execute()
+        elif current_cols < needed_cols:
+            shrink_columns.append({"updateSheetProperties":{
+                "properties":{"sheetId":sheet["sheetId"],"gridProperties":{"columnCount":needed_cols}},
+                "fields":"gridProperties.columnCount"
+            }})
+        if current_rows < needed_rows:
+            expand_rows.append({"updateSheetProperties":{
+                "properties":{"sheetId":sheet["sheetId"],"gridProperties":{"rowCount":needed_rows}},
+                "fields":"gridProperties.rowCount"
+            }})
+    if shrink_columns:
+        api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":shrink_columns}).execute()
+    if expand_rows:
+        api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":expand_rows}).execute()
     # Clear the tabs first so stale rows disappear when a data source shrinks.
     api.spreadsheets().values().batchClear(
         spreadsheetId=SHEET_ID,
