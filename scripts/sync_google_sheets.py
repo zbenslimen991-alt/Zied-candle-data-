@@ -62,6 +62,10 @@ def build_data():
             v.get("dataQuality", ""), v.get("updated", "")))
     backtests.sort(key=lambda x: str(x[0]))
     metrics = tuning.get("metrics") or {}
+    total_trades = sum(row[1] for row in strategies)
+    total_wins = sum(row[2] for row in strategies)
+    total_losses = sum(row[3] for row in strategies)
+    overall_win_rate = round(total_wins * 100 / total_trades, 2) if total_trades else 0
     return {
       "Overview": [["Metric", "Value"],
         ["Updated UTC", datetime.now(timezone.utc).isoformat(timespec="seconds")],
@@ -69,7 +73,9 @@ def build_data():
         ["Open positions", len(opened)], ["Pending orders", len(pending)], ["Closed positions", len(closed)],
         ["Strategies tracked", len(s)], ["Top strategies shown", min(20, len(strategies))],
         ["Signal history rows", min(300, len(signals) if isinstance(signals, list) else 0)],
-        ["Backtest instruments", len(backtests)], ["AI tuning last run", tuning.get("lastRun", "")]],
+        ["Backtest instruments", len(backtests)], ["AI tuning last run", tuning.get("lastRun", "")],
+        ["Total strategy trades", total_trades], ["Total strategy wins", total_wins],
+        ["Total strategy losses", total_losses], ["Overall strategy win rate %", overall_win_rate]],
       "Open Positions": tab(["Pair","Direction","Strategy","Timeframe","Entry","Current","TP","SL","Units","Allocated USD","Signal Quality","Opened At"],
         [(x.get("instId",""),x.get("direction",""),x.get("strategy",""),x.get("timeframe",""),x.get("entryPrice",""),x.get("currentPrice",""),x.get("target",""),x.get("stop",""),x.get("units",""),x.get("allocatedUsd",""),x.get("signalQualityScoreAtEntry",""),x.get("openTime","")) for x in opened]),
       "Pending Orders": tab(["Pair","Type","Limit Price","Market at Order","TP","SL","Allocated USD","Units","Strategy","Created At"],
