@@ -86,6 +86,7 @@ def build_data():
       "Backtest Summary": tab(["Instrument","Trades","Wins","Losses","Win Rate","Profit Factor","Average Return","Max Drawdown","Sharpe Ratio","OOS Trades","Positive OOS Window Rate","Data Quality","Updated"], backtests),
       "AI Learning": [["Metric","Value"]] + [[safe(k),safe(v)] for k,v in metrics.items()] + [["Last run",safe(tuning.get("lastRun",""))],["Window trades",safe(tuning.get("windowTrades",""))]],
       "Data Status": [["Item","Value"],["Source",f"Repository {APP_REPO} via read-only API"],["Refresh UTC",datetime.now(timezone.utc).isoformat(timespec="seconds")],["Mode","Read-only dashboard export; no trading logic changes"]],
+      "Charts": [["Strategy", "Trades"]] + [[row[0], row[1]] for row in strategies[:10]] + [["", ""], ["Outcome", "Count"], ["Wins", sum(row[2] for row in strategies)], ["Losses", sum(row[3] for row in strategies)]],
     }
 
 def main():
