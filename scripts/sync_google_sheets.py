@@ -205,8 +205,8 @@ def build_data(tree):
     order_fields = [
         ("اسم العملة", ("instId", "symbol", "coin", "asset", "instrument")),
         ("سعر الدخول", ("entryPrice", "entry_price", "price", "limitPrice", "avgEntryPrice")),
-        ("TP", ("takeProfit", "tp", "tpPrice", "takeProfitPrice")),
-        ("SL", ("stopLoss", "sl", "slPrice", "stopLossPrice")),
+        ("TP", ("target", "takeProfit", "tp", "tpPrice", "takeProfitPrice")),
+        ("SL", ("stop", "stopLoss", "sl", "slPrice", "stopLossPrice")),
         ("الاستراتيجية", ("strategy", "strategyName", "strategy_name")),
     ]
     closed_fields = [
