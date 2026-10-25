@@ -389,7 +389,8 @@ def build_data(tree):
         "News": tab(["تاريخ النشر UTC","عنوان الخبر","المصدر","العملات المعنية","الأهمية","المعنويات","درجة المعنويات","التصنيف","رابط الخبر","معرّف الخبر"], news_rows),
         "News Summary": news_status,
         "Monthly Trades": monthly_rows,
-        "Profile summary": portfolio_summary,\n        "Portfolio Summary": portfolio_summary,
+        "Profile summary": portfolio_summary,
+        "Portfolio Summary": portfolio_summary,
     }
 
 
