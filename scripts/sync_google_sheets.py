@@ -203,6 +203,46 @@ def build_data(tree):
         for chunk_no, chunk in enumerate(chunks, 1):
             raw_rows.append([path, chunk_no, len(chunks), len(serialized), safe(chunk)])
 
+    # Export the existing news intelligence feed as a readable Google Sheets tab.
+    news_doc = json_data.get("news_intelligence.json", {})
+    news_articles = news_doc.get("articles", []) if isinstance(news_doc, dict) else []
+    cutoff = datetime.now(timezone.utc).timestamp() - 24 * 60 * 60
+    recent_news = []
+    for article in news_articles if isinstance(news_articles, list) else []:
+        if not isinstance(article, dict):
+            continue
+        published = article.get("publishedAt", "")
+        try:
+            published_dt = datetime.fromisoformat(str(published).replace("Z", "+00:00"))
+            if published_dt.tzinfo is None:
+                published_dt = published_dt.replace(tzinfo=timezone.utc)
+            if published_dt.timestamp() < cutoff:
+                continue
+        except (TypeError, ValueError, OverflowError):
+            # Keep undated records visible rather than silently losing a potentially useful headline.
+            pass
+        recent_news.append(article)
+    recent_news.sort(key=lambda a: str(a.get("publishedAt", "")), reverse=True)
+    news_rows = [[
+        a.get("publishedAt", ""), a.get("title", ""), a.get("source", ""),
+        ", ".join(str(x) for x in (a.get("assets", []) if isinstance(a.get("assets", []), list) else [])),
+        a.get("impact", ""), a.get("sentiment", ""), a.get("sentimentScore", ""),
+        a.get("newsLevel", ""), a.get("url", ""), a.get("id", "")
+    ] for a in recent_news]
+    news_status = [
+        ["المؤشر", "القيمة"],
+        ["آخر تحديث للأخبار UTC", news_doc.get("updatedAt", "") if isinstance(news_doc, dict) else ""],
+        ["حالة الأخبار", news_doc.get("status", "UNKNOWN") if isinstance(news_doc, dict) else "UNKNOWN"],
+        ["المصادر الناجحة", (news_doc.get("health", {}) or {}).get("feedsOk", "") if isinstance(news_doc, dict) else ""],
+        ["إجمالي المصادر", (news_doc.get("health", {}) or {}).get("feedsTotal", "") if isinstance(news_doc, dict) else ""],
+        ["الأخبار خلال آخر 24 ساعة", len(recent_news)],
+        ["المعنويات العامة", news_doc.get("sentiment", "") if isinstance(news_doc, dict) else ""],
+        ["درجة المعنويات", news_doc.get("sentimentScore", "") if isinstance(news_doc, dict) else ""],
+        ["مستوى المخاطر الإخباري", news_doc.get("riskLevel", "") if isinstance(news_doc, dict) else ""],
+        ["أخبار عالية التأثير", news_doc.get("highImpactCount", "") if isinstance(news_doc, dict) else ""],
+        ["ملاحظة", "الأخبار معلومات مساعدة فقط ولا تغيّر قرارات التداول."],
+    ]
+
     tuning_last = tuning.get("lastRun", "") if isinstance(tuning, dict) else ""
     return {
       "Overview": [["Metric", "Value"],
@@ -230,6 +270,8 @@ def build_data(tree):
       "AI Learning": [["Metric","Value"]] + [[safe(k), safe(v)] for k,v in metrics.items()] + [["Last run",safe(tuning_last)],["Window trades",safe(tuning.get("windowTrades","") if isinstance(tuning,dict) else "")]],
       "Storage Files": tab(["Storage JSON Path","Size Bytes","Size MB","Git Blob SHA"], storage_rows),
       "Raw Data": tab(["Source JSON File","Chunk Index","Total Chunks","JSON Characters","JSON Data Chunk"], raw_rows),
+      "News": tab(["تاريخ النشر UTC","عنوان الخبر","المصدر","العملات المعنية","الأهمية","المعنويات","درجة المعنويات","التصنيف","رابط الخبر","معرّف الخبر"], news_rows),
+      "News Summary": news_status,
       "Data Status": [["Item","Value"],
         ["Source",f"Private repository {APP_REPO} via read-only GitHub API"],
         ["Refresh UTC",datetime.now(timezone.utc).isoformat(timespec="seconds")],
