@@ -185,8 +185,8 @@ def build_data(tree):
     open_fields = [
         ("اسم العملة", ("instId", "symbol", "coin", "asset", "instrument")),
         ("سعر الدخول", ("entryPrice", "entry_price", "price", "avgEntryPrice")),
-        ("TP", ("takeProfit", "tp", "tpPrice", "takeProfitPrice")),
-        ("SL", ("stopLoss", "sl", "slPrice", "stopLossPrice")),
+        ("TP", ("target", "takeProfit", "tp", "tpPrice", "takeProfitPrice")),
+        ("SL", ("stop", "stopLoss", "sl", "slPrice", "stopLossPrice")),
         ("التغير %", ("changePct", "changePercent", "pnlPercent", "unrealizedPnlPct", "pnlPct")),
         ("الاستراتيجية", ("strategy", "strategyName", "strategy_name")),
     ]
