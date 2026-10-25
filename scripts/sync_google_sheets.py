@@ -368,7 +368,7 @@ def main():
     existing = {x["properties"]["title"]: x for x in meta.get("sheets", [])}
     # Monthly Trades and Portfolio Summary are user-requested preserve-as-is tabs.
     # Do not overwrite their existing contents during this compact sync.
-    preserve_tabs = {"Monthly Trades", "Portfolio Summary"}
+    preserve_tabs = {"Portfolio Summary"}
     write_data = {name: rows for name, rows in data.items()
                   if name not in preserve_tabs or name not in existing}
 
