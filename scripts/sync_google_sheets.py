@@ -268,11 +268,76 @@ def build_data(tree):
     total_wins = sum((row[2] or 0) for row in strategies)
     total_losses = sum((row[3] or 0) for row in strategies)
     overall_win_rate = round(total_wins * 100 / total_trades, 2) if total_trades else 0
+    # Portfolio profile: compute account equity and realized/unrealized PnL
+    # from the canonical portfolio snapshot. Use closeTime for day/week buckets.
+    now_utc = datetime.now(timezone.utc)
+    today_key = now_utc.date().isoformat()
+    week_start = (now_utc.date() - __import__("datetime").timedelta(days=now_utc.weekday())).isoformat()
+
+    def as_number(value, default=0.0):
+        try:
+            number = float(value)
+            return number if number == number and abs(number) != float("inf") else default
+        except (TypeError, ValueError):
+            return default
+
+    def parse_trade_time(item):
+        raw = first_value(item, "closeTime", "closedAt", "exitTime", "timestamp", "date")
+        if not raw:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    realized_total = realized_today = realized_week = 0.0
+    for trade in closed if isinstance(closed, list) else []:
+        if not isinstance(trade, dict):
+            continue
+        pnl = as_number(first_value(trade, "profitUsd", "netPnl", "netProfit", "realizedPnl", "pnlNet", "pnl", "profit", default=0))
+        realized_total += pnl
+        trade_time = parse_trade_time(trade)
+        if trade_time:
+            if trade_time.date().isoformat() == today_key:
+                realized_today += pnl
+            if trade_time.date().isoformat() >= week_start:
+                realized_week += pnl
+
+    unrealized_pnl = 0.0
+    open_market_value = 0.0
+    for position in opened if isinstance(opened, list) else []:
+        if not isinstance(position, dict):
+            continue
+        units = as_number(first_value(position, "units", "quantity", "qty"))
+        current = as_number(first_value(position, "currentPrice", "markPrice", "lastPrice", "entryPrice", "entry_price"))
+        entry = as_number(first_value(position, "entryPrice", "entry_price", "avgEntryPrice", "openPrice"))
+        open_market_value += units * current
+        unrealized_pnl += (current - entry) * units - as_number(first_value(position, "entryFeeUsd", default=0))
+
+    pending_reserved = sum(as_number(first_value(order, "reservedUsd", "allocatedUsd", "amountUsd", default=0))
+                           for order in pending if isinstance(order, dict))
+    cash_value = as_number(first_value(p, "cash", default=0))
+    portfolio_size = cash_value + open_market_value + pending_reserved
+    total_pnl = realized_total + unrealized_pnl
+    # Current open PnL is included in today's/week's live PnL for a useful snapshot;
+    # realized components are bucketed by close date.
+    daily_pnl = realized_today + unrealized_pnl
+    weekly_pnl = realized_week + unrealized_pnl
+
     portfolio_summary = [
         ["المؤشر", "القيمة"],
-        ["آخر تحديث UTC", datetime.now(timezone.utc).isoformat(timespec="seconds")],
-        ["رأس المال الأولي USD", first_value(p, "initialCapital")],
-        ["النقد USD", first_value(p, "cash")],
+        ["آخر تحديث UTC", now_utc.isoformat(timespec="seconds")],
+        ["حجم المحفظة الحالي USD", round(portfolio_size, 8)],
+        ["رأس المال الأولي USD", as_number(first_value(p, "initialCapital", default=0))],
+        ["النقد المتاح USD", round(cash_value, 8)],
+        ["قيمة الصفقات المفتوحة USD", round(open_market_value, 8)],
+        ["المبلغ المحجوز للأوامر USD", round(pending_reserved, 8)],
+        ["الربح/الخسارة اليومي USD (محقق + عائم)", round(daily_pnl, 8)],
+        ["الربح/الخسارة الأسبوعي USD (محقق + عائم)", round(weekly_pnl, 8)],
+        ["إجمالي الربح/الخسارة USD (محقق + عائم)", round(total_pnl, 8)],
+        ["الربح/الخسارة المحقق الإجمالي USD", round(realized_total, 8)],
+        ["الربح/الخسارة العائم USD", round(unrealized_pnl, 8)],
         ["عدد الصفقات المفتوحة", len(opened) if isinstance(opened, list) else 0],
         ["عدد الأوامر المعلقة", len(pending) if isinstance(pending, list) else 0],
         ["عدد الصفقات المغلقة", len(closed) if isinstance(closed, list) else 0],
@@ -324,7 +389,7 @@ def build_data(tree):
         "News": tab(["تاريخ النشر UTC","عنوان الخبر","المصدر","العملات المعنية","الأهمية","المعنويات","درجة المعنويات","التصنيف","رابط الخبر","معرّف الخبر"], news_rows),
         "News Summary": news_status,
         "Monthly Trades": monthly_rows,
-        "Portfolio Summary": portfolio_summary,
+        "Profile summary": portfolio_summary,\n        "Portfolio Summary": portfolio_summary,
     }
 
 
@@ -366,11 +431,9 @@ def main():
         fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))"
     ).execute()
     existing = {x["properties"]["title"]: x for x in meta.get("sheets", [])}
-    # Monthly Trades and Portfolio Summary are user-requested preserve-as-is tabs.
-    # Do not overwrite their existing contents during this compact sync.
-    preserve_tabs = {"Portfolio Summary"}
-    write_data = {name: rows for name, rows in data.items()
-                  if name not in preserve_tabs or name not in existing}
+    # Always refresh profile/portfolio summaries; stale preserved tabs caused the
+    # reported Profile summary refresh failure.
+    write_data = data
 
     # Create missing retained tabs.
     additions = []
@@ -391,8 +454,7 @@ def main():
         ).execute()
         existing = {x["properties"]["title"]: x for x in meta.get("sheets", [])}
 
-    # The user requested only these tabs. Delete all other worksheet tabs,
-    # including Top 20 Strategies, Raw Data, Charts, Signal History and inventories.
+    # Retain only the current compact dashboard tabs, including the live profile summary.
     retained = set(data)
     obsolete = [{"deleteSheet": {"sheetId": item["properties"]["sheetId"]}}
                 for item in meta.get("sheets", []) if item["properties"]["title"] not in retained]
@@ -446,7 +508,7 @@ def main():
         write_sheet_in_chunks(api, sheet_id, name, rows)
 
     print("Google Sheets compact sync succeeded:", ", ".join(write_data))
-    print("Only the nine requested tabs remain; raw JSON and Top 20 export are disabled.")
+    print("Profile summary and Portfolio Summary refreshed with portfolio size and daily/weekly/total PnL; raw JSON export remains disabled.")
 
 
 if __name__ == "__main__":
