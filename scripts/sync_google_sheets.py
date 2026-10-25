@@ -179,7 +179,19 @@ def build_data(tree):
         for item in items if isinstance(items, list) else []:
             if not isinstance(item, dict):
                 continue
-            rows.append([first_value(item, *aliases) for aliases in fields])
+            values = []
+            for aliases in fields:
+                value = first_value(item, *aliases)
+                if aliases[0] == "changePct" and value == "":
+                    entry = first_value(item, "entryPrice", "entry_price", "avgEntryPrice", "openPrice")
+                    current = first_value(item, "currentPrice", "markPrice", "lastPrice")
+                    try:
+                        entry_num, current_num = float(entry), float(current)
+                        value = round((current_num / entry_num - 1) * 100, 4) if entry_num else ""
+                    except (TypeError, ValueError):
+                        value = ""
+                values.append(value)
+            rows.append(values)
         return rows
 
     open_fields = [
@@ -409,6 +421,18 @@ def main():
                 "properties": {"sheetId": props["sheetId"], "gridProperties": {"rowCount": needed_rows}},
                 "fields": "gridProperties.rowCount"
             }})
+    for name, widths in {
+        "Open Positions": [145, 115, 85, 85, 95, 180],
+        "Pending Orders": [145, 115, 85, 85, 180],
+        "Closed Positions": [145, 115, 130, 110, 180],
+    }.items():
+        if name in existing:
+            sid = existing[name]["properties"]["sheetId"]
+            for col, px in enumerate(widths):
+                grid_requests.append({"updateDimensionProperties": {
+                    "range": {"sheetId": sid, "dimension": "COLUMNS", "startIndex": col, "endIndex": col + 1},
+                    "properties": {"pixelSize": px}, "fields": "pixelSize"
+                }})
     if grid_requests:
         api.spreadsheets().batchUpdate(spreadsheetId=sheet_id, body={"requests": grid_requests}).execute()
 
