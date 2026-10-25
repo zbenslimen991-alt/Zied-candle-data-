@@ -144,33 +144,66 @@ def records_table(items, preferred_headers=None):
     return [keys] + [[safe(x.get(k, "")) for k in keys] for x in dict_items]
 
 
+def first_value(record, *keys, default=""):
+    if not isinstance(record, dict):
+        return default
+    for key in keys:
+        value = record.get(key)
+        if value not in (None, ""):
+            return value
+    return default
+
+
 def build_data(tree):
     file_index = {x["path"]: x for x in tree}
-    json_files = [x for x in tree if x["path"].lower().endswith(".json") and not x["path"].startswith("candle_history/")]
+    # Read only sources needed by the retained dashboard tabs. Avoid downloading
+    # every JSON file and exporting large analysis-memory blobs to Google Sheets.
     required = [
-        "portfolio_0001.json", "strategy_stats_0001.json", "signal_history_0001.json",
-        "backtest_results_0001.json", "auto_tuned_config.json"
+        "portfolio_0001.json", "strategy_stats_0001.json",
+        "backtest_results_0001.json", "news_intelligence.json"
     ]
-    missing = [p for p in required if p not in file_index]
+    missing = [path for path in required if path not in file_index]
     if missing:
         raise RuntimeError("Required dashboard source file(s) missing: " + ", ".join(missing))
-
-    # Load every non-candle JSON data file, including the large analysis-memory file.
-    json_data = {}
-    for item in json_files:
-        try:
-            json_data[item["path"]] = fetch_json(item["path"], file_index)
-        except Exception as exc:
-            raise RuntimeError(f"Could not export JSON file {item['path']}: {exc}") from exc
-
-    p = json_data["portfolio_0001.json"]
-    s = json_data["strategy_stats_0001.json"]
-    signals = json_data["signal_history_0001.json"]
-    bt = json_data["backtest_results_0001.json"]
-    tuning = json_data["auto_tuned_config.json"]
+    source = {path: fetch_json(path, file_index) for path in required}
+    p = source["portfolio_0001.json"]
+    s = source["strategy_stats_0001.json"]
+    bt = source["backtest_results_0001.json"]
+    news_doc = source["news_intelligence.json"]
     opened = p.get("openPositions", []) if isinstance(p, dict) else []
     pending = p.get("pendingLimitOrders", []) if isinstance(p, dict) else []
     closed = p.get("closedPositions", []) if isinstance(p, dict) else []
+
+    def compact_positions(items, fields):
+        rows = []
+        for item in items if isinstance(items, list) else []:
+            if not isinstance(item, dict):
+                continue
+            rows.append([first_value(item, *aliases) for aliases in fields])
+        return rows
+
+    open_fields = [
+        ("اسم العملة", ("instId", "symbol", "coin", "asset", "instrument")),
+        ("سعر الدخول", ("entryPrice", "entry_price", "price", "avgEntryPrice")),
+        ("TP", ("takeProfit", "tp", "tpPrice", "takeProfitPrice")),
+        ("SL", ("stopLoss", "sl", "slPrice", "stopLossPrice")),
+        ("التغير %", ("changePct", "changePercent", "pnlPercent", "unrealizedPnlPct", "pnlPct")),
+        ("الاستراتيجية", ("strategy", "strategyName", "strategy_name")),
+    ]
+    order_fields = [
+        ("اسم العملة", ("instId", "symbol", "coin", "asset", "instrument")),
+        ("سعر الدخول", ("entryPrice", "entry_price", "price", "limitPrice", "avgEntryPrice")),
+        ("TP", ("takeProfit", "tp", "tpPrice", "takeProfitPrice")),
+        ("SL", ("stopLoss", "sl", "slPrice", "stopLossPrice")),
+        ("الاستراتيجية", ("strategy", "strategyName", "strategy_name")),
+    ]
+    closed_fields = [
+        ("اسم العملة", ("instId", "symbol", "coin", "asset", "instrument")),
+        ("سعر الدخول", ("entryPrice", "entry_price", "avgEntryPrice", "openPrice")),
+        ("طريقة الخروج", ("exitReason", "closeReason", "exitType", "closeType", "reason", "exit_reason")),
+        ("صافي الربح", ("netPnl", "netProfit", "realizedPnl", "pnlNet", "pnl", "profit")),
+        ("الاستراتيجية", ("strategy", "strategyName", "strategy_name")),
+    ]
 
     strategies = []
     if isinstance(s, dict):
@@ -180,8 +213,9 @@ def build_data(tree):
             trades = v.get("trades", 0) or 0
             wins = v.get("wins", 0) or 0
             losses = v.get("losses", 0) or 0
-            strategies.append((name, trades, wins, losses, round(wins * 100 / trades, 2) if trades else 0,
-                v.get("pnlSum", 0), v.get("weight", ""), v.get("tpHits", 0), v.get("slHits", 0),
+            strategies.append((name, trades, wins, losses,
+                round(wins * 100 / trades, 2) if trades else 0, v.get("pnlSum", 0),
+                v.get("weight", ""), v.get("tpHits", 0), v.get("slHits", 0),
                 v.get("timeHits", 0), v.get("effectiveSamples", 0), v.get("lastWeeklyUpdate", "")))
     strategies.sort(key=lambda x: (x[1], x[4], x[5]), reverse=True)
 
@@ -190,38 +224,56 @@ def build_data(tree):
         for key, v in bt.items():
             if key.startswith("__") or not isinstance(v, dict):
                 continue
-            backtests.append((v.get("instId", key), v.get("trades", ""), v.get("wins", ""), v.get("losses", ""),
-                v.get("winRate", ""), v.get("profitFactor", ""), v.get("averageReturn", ""), v.get("maxDrawdown", ""),
-                v.get("sharpeRatio", ""), v.get("oosTrades", ""), v.get("positiveOosWindowRate", ""),
+            backtests.append((v.get("instId", key), v.get("trades", ""), v.get("wins", ""),
+                v.get("losses", ""), v.get("winRate", ""), v.get("profitFactor", ""),
+                v.get("averageReturn", ""), v.get("maxDrawdown", ""), v.get("sharpeRatio", ""),
+                v.get("oosTrades", ""), v.get("positiveOosWindowRate", ""),
                 v.get("dataQuality", ""), v.get("updated", "")))
     backtests.sort(key=lambda x: str(x[0]))
 
-    metrics = tuning.get("metrics") or {} if isinstance(tuning, dict) else {}
-    total_trades = sum(row[1] for row in strategies)
-    total_wins = sum(row[2] for row in strategies)
-    total_losses = sum(row[3] for row in strategies)
+    # Preserve the monthly trade view, deriving it from closed positions only.
+    monthly = {}
+    for item in closed if isinstance(closed, list) else []:
+        if not isinstance(item, dict):
+            continue
+        date_value = first_value(item, "closedAt", "closeTime", "exitTime", "updatedAt", "timestamp", "date")
+        month = str(date_value)[:7] if date_value else "غير محدد"
+        pnl = first_value(item, "netPnl", "netProfit", "realizedPnl", "pnlNet", "pnl", "profit", default=0)
+        try:
+            pnl = float(pnl)
+        except (TypeError, ValueError):
+            pnl = 0.0
+        slot = monthly.setdefault(month, {"count": 0, "profit": 0.0, "wins": 0, "losses": 0})
+        slot["count"] += 1
+        slot["profit"] += pnl
+        slot["wins"] += int(pnl > 0)
+        slot["losses"] += int(pnl < 0)
+    monthly_rows = [["الشهر", "عدد الصفقات", "الصفقات الرابحة", "الصفقات الخاسرة", "صافي الربح"]]
+    monthly_rows += [[m, v["count"], v["wins"], v["losses"], round(v["profit"], 8)]
+                     for m, v in sorted(monthly.items(), reverse=True)]
+
+    total_trades = sum((row[1] or 0) for row in strategies)
+    total_wins = sum((row[2] or 0) for row in strategies)
+    total_losses = sum((row[3] or 0) for row in strategies)
     overall_win_rate = round(total_wins * 100 / total_trades, 2) if total_trades else 0
+    portfolio_summary = [
+        ["المؤشر", "القيمة"],
+        ["آخر تحديث UTC", datetime.now(timezone.utc).isoformat(timespec="seconds")],
+        ["رأس المال الأولي USD", first_value(p, "initialCapital")],
+        ["النقد USD", first_value(p, "cash")],
+        ["عدد الصفقات المفتوحة", len(opened) if isinstance(opened, list) else 0],
+        ["عدد الأوامر المعلقة", len(pending) if isinstance(pending, list) else 0],
+        ["عدد الصفقات المغلقة", len(closed) if isinstance(closed, list) else 0],
+        ["إجمالي صفقات الاستراتيجيات", total_trades],
+        ["الصفقات الرابحة للاستراتيجيات", total_wins],
+        ["الصفقات الخاسرة للاستراتيجيات", total_losses],
+        ["نسبة الفوز للاستراتيجيات %", overall_win_rate],
+    ]
 
-    # Index only storage JSON files; do not export source code or candle-history files.
-    storage_rows = [[x["path"], x.get("size", 0), round(x.get("size", 0) / 1048576, 3), x.get("sha", "")]
-                    for x in sorted(json_files, key=lambda item: item["path"].lower())]
-
-    # Preserve every non-candle JSON data file losslessly as chunked JSON text.
-    # Flattening large analysis-memory files creates excessive repeated metadata and
-    # exceeds the Sheets write quota; the dashboard tabs above provide readable views.
-    raw_rows = []
-    for path in sorted(json_data):
-        serialized = json.dumps(json_data[path], ensure_ascii=False, separators=(",", ":"))
-        chunks = [serialized[i:i + MAX_CELL_CHARS] for i in range(0, len(serialized), MAX_CELL_CHARS)] or [""]
-        for chunk_no, chunk in enumerate(chunks, 1):
-            raw_rows.append([path, chunk_no, len(chunks), len(serialized), safe(chunk)])
-
-    # Export the existing news intelligence feed as a readable Google Sheets tab.
-    news_doc = json_data.get("news_intelligence.json", {})
-    news_articles = news_doc.get("articles", []) if isinstance(news_doc, dict) else []
     cutoff = datetime.now(timezone.utc).timestamp() - 24 * 60 * 60
     recent_news = []
-    for article in news_articles if isinstance(news_articles, list) else []:
+    articles = news_doc.get("articles", []) if isinstance(news_doc, dict) else []
+    for article in articles if isinstance(articles, list) else []:
         if not isinstance(article, dict):
             continue
         published = article.get("publishedAt", "")
@@ -232,16 +284,13 @@ def build_data(tree):
             if published_dt.timestamp() < cutoff:
                 continue
         except (TypeError, ValueError, OverflowError):
-            # Keep undated records visible rather than silently losing a potentially useful headline.
             pass
         recent_news.append(article)
     recent_news.sort(key=lambda a: str(a.get("publishedAt", "")), reverse=True)
-    news_rows = [[
-        a.get("publishedAt", ""), a.get("title", ""), a.get("source", ""),
+    news_rows = [[a.get("publishedAt", ""), a.get("title", ""), a.get("source", ""),
         ", ".join(str(x) for x in (a.get("assets", []) if isinstance(a.get("assets", []), list) else [])),
         a.get("impact", ""), a.get("sentiment", ""), a.get("sentimentScore", ""),
-        a.get("newsLevel", ""), a.get("url", ""), a.get("id", "")
-    ] for a in recent_news]
+        a.get("newsLevel", ""), a.get("url", ""), a.get("id", "")] for a in recent_news]
     news_status = [
         ["المؤشر", "القيمة"],
         ["آخر تحديث للأخبار UTC", news_doc.get("updatedAt", "") if isinstance(news_doc, dict) else ""],
@@ -253,45 +302,17 @@ def build_data(tree):
         ["درجة المعنويات", news_doc.get("sentimentScore", "") if isinstance(news_doc, dict) else ""],
         ["مستوى المخاطر الإخباري", news_doc.get("riskLevel", "") if isinstance(news_doc, dict) else ""],
         ["أخبار عالية التأثير", news_doc.get("highImpactCount", "") if isinstance(news_doc, dict) else ""],
-        ["ملاحظة", "الأخبار معلومات مساعدة فقط ولا تغيّر قرارات التداول."],
     ]
-
-    tuning_last = tuning.get("lastRun", "") if isinstance(tuning, dict) else ""
     return {
-      "Overview": [["Metric", "Value"],
-        ["Updated UTC", datetime.now(timezone.utc).isoformat(timespec="seconds")],
-        ["Source repository", APP_REPO],
-        ["Initial capital USD", p.get("initialCapital", "") if isinstance(p, dict) else ""],
-        ["Cash USD", p.get("cash", "") if isinstance(p, dict) else ""],
-        ["Open positions", len(opened) if isinstance(opened, list) else 0],
-        ["Pending orders", len(pending) if isinstance(pending, list) else 0],
-        ["Closed positions", len(closed) if isinstance(closed, list) else 0],
-        ["Strategies tracked", len(strategies)],
-        ["Total strategy trades", total_trades], ["Total strategy wins", total_wins],
-        ["Total strategy losses", total_losses], ["Overall strategy win rate %", overall_win_rate],
-        ["Backtest instruments", len(backtests)], ["Non-candle JSON files exported", len(json_files)],
-        ["Storage JSON files exported", len(json_files)], ["Raw JSON chunks exported", len(raw_rows)],
-        ["AI tuning last run", tuning_last],
-        ["Scope note", "Only storage JSON files are exported. Candle-history files and program source-code files are excluded. Raw storage JSON is preserved in chunks in Raw Data, with readable dashboard tabs for key records."]],
-      "Open Positions": records_table(opened),
-      "Pending Orders": records_table(pending),
-      "Closed Positions": records_table(closed),
-      "All Strategies": tab(["Strategy","Trades","Wins","Losses","Win Rate %","PnL Sum","Weight","TP Hits","SL Hits","Time Exits","Effective Samples","Last Weekly Update"], strategies),
-      "Top 20 Strategies": tab(["Strategy","Trades","Wins","Losses","Win Rate %","PnL Sum","Weight","TP Hits","SL Hits","Time Exits","Effective Samples","Last Weekly Update"], strategies[:20]),
-      "Signal History": records_table(signals if isinstance(signals, list) else []),
-      "Backtest Summary": tab(["Instrument","Trades","Wins","Losses","Win Rate","Profit Factor","Average Return","Max Drawdown","Sharpe Ratio","OOS Trades","Positive OOS Window Rate","Data Quality","Updated"], backtests),
-      "AI Learning": [["Metric","Value"]] + [[safe(k), safe(v)] for k,v in metrics.items()] + [["Last run",safe(tuning_last)],["Window trades",safe(tuning.get("windowTrades","") if isinstance(tuning,dict) else "")]],
-      "Storage Files": tab(["Storage JSON Path","Size Bytes","Size MB","Git Blob SHA"], storage_rows),
-      "News": tab(["تاريخ النشر UTC","عنوان الخبر","المصدر","العملات المعنية","الأهمية","المعنويات","درجة المعنويات","التصنيف","رابط الخبر","معرّف الخبر"], news_rows),
-      "News Summary": news_status,
-      "Raw Data": tab(["Source JSON File","Chunk Index","Total Chunks","JSON Characters","JSON Data Chunk"], raw_rows),
-      "Data Status": [["Item","Value"],
-        ["Source",f"Private repository {APP_REPO} via read-only GitHub API"],
-        ["Refresh UTC",datetime.now(timezone.utc).isoformat(timespec="seconds")],
-        ["Storage JSON files fully exported",len(json_files)],["Raw JSON chunks",len(raw_rows)],
-        ["Mode","Read-only storage-data export; no trading logic changes"],
-        ["Excluded","Candle-history files and program source-code files"]],
-      "Charts": [["Strategy", "Trades"]] + [[row[0], row[1]] for row in strategies[:10]] + [["", ""], ["Outcome", "Count"], ["Wins", total_wins], ["Losses", total_losses]],
+        "Open Positions": tab([x[0] for x in open_fields], compact_positions(opened, [x[1] for x in open_fields])),
+        "Pending Orders": tab([x[0] for x in order_fields], compact_positions(pending, [x[1] for x in order_fields])),
+        "Closed Positions": tab([x[0] for x in closed_fields], compact_positions(closed, [x[1] for x in closed_fields])),
+        "All Strategies": tab(["Strategy","Trades","Wins","Losses","Win Rate %","PnL Sum","Weight","TP Hits","SL Hits","Time Exits","Effective Samples","Last Weekly Update"], strategies),
+        "Backtest Summary": tab(["Instrument","Trades","Wins","Losses","Win Rate","Profit Factor","Average Return","Max Drawdown","Sharpe Ratio","OOS Trades","Positive OOS Window Rate","Data Quality","Updated"], backtests),
+        "News": tab(["تاريخ النشر UTC","عنوان الخبر","المصدر","العملات المعنية","الأهمية","المعنويات","درجة المعنويات","التصنيف","رابط الخبر","معرّف الخبر"], news_rows),
+        "News Summary": news_status,
+        "Monthly Trades": monthly_rows,
+        "Portfolio Summary": portfolio_summary,
     }
 
 
@@ -327,150 +348,76 @@ def main():
     info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     api = build("sheets", "v4", credentials=creds, cache_discovery=False)
+    sheet_id = SHEET_ID
     meta = api.spreadsheets().get(
-        spreadsheetId=SHEET_ID,
+        spreadsheetId=sheet_id,
         fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))"
     ).execute()
     existing = {x["properties"]["title"]: x for x in meta.get("sheets", [])}
+
+    # Create missing retained tabs.
     additions = []
     for name, rows in data.items():
         if name not in existing:
-            needed_rows = max(1000, len(rows) + 10)
-            needed_cols = max(7 if name == "Charts" else 1, max((len(row) for row in rows), default=1))
-            additions.append({"addSheet":{"properties":{
-                "title":name,
-                "gridProperties":{"rowCount":needed_rows,"columnCount":needed_cols}
+            additions.append({"addSheet": {"properties": {
+                "title": name,
+                "gridProperties": {
+                    "rowCount": max(1000, len(rows) + 10),
+                    "columnCount": max(1, max((len(row) for row in rows), default=1))
+                }
             }}})
     if additions:
-        api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":additions}).execute()
-    # Remove obsolete tabs that previously displayed candle-file inventories or source-code inventory.
-    obsolete_titles = {"Candle Summary", "Candle Catalog", "Repository Files"}
-    obsolete_requests = [{"deleteSheet": {"sheetId": item["properties"]["sheetId"]}}
-                         for item in meta.get("sheets", []) if item["properties"]["title"] in obsolete_titles]
-    if obsolete_requests:
-        api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests": obsolete_requests}).execute()
+        api.spreadsheets().batchUpdate(spreadsheetId=sheet_id, body={"requests": additions}).execute()
         meta = api.spreadsheets().get(
-            spreadsheetId=SHEET_ID,
+            spreadsheetId=sheet_id,
             fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))"
         ).execute()
         existing = {x["properties"]["title"]: x for x in meta.get("sheets", [])}
-    # Expand existing tabs before writing storage exports.
+
+    # The user requested only these tabs. Delete all other worksheet tabs,
+    # including Top 20 Strategies, Raw Data, Charts, Signal History and inventories.
+    retained = set(data)
+    obsolete = [{"deleteSheet": {"sheetId": item["properties"]["sheetId"]}}
+                for item in meta.get("sheets", []) if item["properties"]["title"] not in retained]
+    if obsolete:
+        api.spreadsheets().batchUpdate(spreadsheetId=sheet_id, body={"requests": obsolete}).execute()
+
+    # Refresh metadata after deletion; fit grid sizes to the compact exports.
     meta = api.spreadsheets().get(
-        spreadsheetId=SHEET_ID,
+        spreadsheetId=sheet_id,
         fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))"
     ).execute()
     existing = {x["properties"]["title"]: x for x in meta.get("sheets", [])}
-    shrink_columns = []
-    expand_rows = []
+    grid_requests = []
     for name, rows in data.items():
-        sheet = existing[name]["properties"]
-        grid = sheet.get("gridProperties", {})
+        props = existing[name]["properties"]
         needed_rows = max(1000, len(rows) + 10)
-        needed_cols = max(7 if name == "Charts" else 1, max((len(row) for row in rows), default=1))
-        current_cols = grid.get("columnCount", 26)
-        current_rows = grid.get("rowCount", 1000)
-        # Shrink default 26-column grids first; otherwise expanding a long tab can
-        # transiently exceed the workbook-wide 20 million cell limit.
-        if current_cols > needed_cols:
-            shrink_columns.append({"updateSheetProperties":{
-                "properties":{"sheetId":sheet["sheetId"],"gridProperties":{"columnCount":needed_cols}},
-                "fields":"gridProperties.columnCount"
+        needed_cols = max(1, max((len(row) for row in rows), default=1))
+        grid = props.get("gridProperties", {})
+        if grid.get("columnCount", 26) != needed_cols:
+            grid_requests.append({"updateSheetProperties": {
+                "properties": {"sheetId": props["sheetId"], "gridProperties": {"columnCount": needed_cols}},
+                "fields": "gridProperties.columnCount"
             }})
-        elif current_cols < needed_cols:
-            shrink_columns.append({"updateSheetProperties":{
-                "properties":{"sheetId":sheet["sheetId"],"gridProperties":{"columnCount":needed_cols}},
-                "fields":"gridProperties.columnCount"
+        if grid.get("rowCount", 1000) < needed_rows:
+            grid_requests.append({"updateSheetProperties": {
+                "properties": {"sheetId": props["sheetId"], "gridProperties": {"rowCount": needed_rows}},
+                "fields": "gridProperties.rowCount"
             }})
-        if current_rows < needed_rows:
-            expand_rows.append({"updateSheetProperties":{
-                "properties":{"sheetId":sheet["sheetId"],"gridProperties":{"rowCount":needed_rows}},
-                "fields":"gridProperties.rowCount"
-            }})
-    if shrink_columns:
-        api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":shrink_columns}).execute()
-    if expand_rows:
-        api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":expand_rows}).execute()
-    # Clear the tabs first so stale rows disappear when a data source shrinks.
+    if grid_requests:
+        api.spreadsheets().batchUpdate(spreadsheetId=sheet_id, body={"requests": grid_requests}).execute()
+
+    # Clear and rewrite only retained, compact tabs so old trailing values disappear.
     execute_sheet_write(api.spreadsheets().values().batchClear(
-        spreadsheetId=SHEET_ID,
-        body={"ranges":[f"'{name}'!A:{column_letter(max(1, (7 if name == 'Charts' else max((len(row) for row in rows), default=1))))}" for name, rows in data.items()]}
+        spreadsheetId=sheet_id,
+        body={"ranges": [f"'{name}'!A:{column_letter(max(1, max((len(row) for row in rows), default=1)))}"
+                         for name, rows in data.items()]}
     ))
     for name, rows in data.items():
-        write_sheet_in_chunks(api, SHEET_ID, name, rows)
+        write_sheet_in_chunks(api, sheet_id, name, rows)
 
-    meta = api.spreadsheets().get(
-        spreadsheetId=SHEET_ID, fields="sheets(properties(sheetId,title),charts(chartId))"
-    ).execute()
-    chart_sheet = next(x for x in meta["sheets"] if x["properties"]["title"] == "Charts")
-    chart_sheet_id = chart_sheet["properties"]["sheetId"]
-    delete_requests = [{"deleteEmbeddedObject":{"objectId":x["chartId"]}} for x in chart_sheet.get("charts", [])]
-    if delete_requests:
-        api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":delete_requests}).execute()
-    charts = [
-        {
-            "addChart": {
-                "chart": {
-                    "spec": {
-                        "title": "Top 10 Strategies by Number of Trades",
-                        "basicChart": {
-                            "chartType": "BAR",
-                            "legendPosition": "NO_LEGEND",
-                            "headerCount": 1,
-                            "domains": [{
-                                "domain": {"sourceRange": {"sources": [{
-                                    "sheetId": chart_sheet_id, "startRowIndex": 0, "endRowIndex": 11,
-                                    "startColumnIndex": 0, "endColumnIndex": 1
-                                }]}}
-                            }],
-                            "series": [{
-                                "series": {"sourceRange": {"sources": [{
-                                    "sheetId": chart_sheet_id, "startRowIndex": 0, "endRowIndex": 11,
-                                    "startColumnIndex": 1, "endColumnIndex": 2
-                                }]}},
-                                "targetAxis": "BOTTOM_AXIS"
-                            }],
-                            "axis": [
-                                {"position": "BOTTOM_AXIS", "title": "Trades"},
-                                {"position": "LEFT_AXIS", "title": "Strategy"}
-                            ]
-                        }
-                    },
-                    "position": {"overlayPosition": {
-                        "anchorCell": {"sheetId": chart_sheet_id, "rowIndex": 0, "columnIndex": 6},
-                        "widthPixels": 720, "heightPixels": 360
-                    }}
-                }
-            }
-        },
-        {
-            "addChart": {
-                "chart": {
-                    "spec": {
-                        "title": "Wins vs Losses",
-                        "pieChart": {
-                            "legendPosition": "RIGHT_LEGEND",
-                            "threeDimensional": False,
-                            "domain": {"sourceRange": {"sources": [{
-                                "sheetId": chart_sheet_id, "startRowIndex": 12, "endRowIndex": 15,
-                                "startColumnIndex": 0, "endColumnIndex": 1
-                            }]}},
-                            "series": {"sourceRange": {"sources": [{
-                                "sheetId": chart_sheet_id, "startRowIndex": 12, "endRowIndex": 15,
-                                "startColumnIndex": 1, "endColumnIndex": 2
-                            }]}}
-                        }
-                    },
-                    "position": {"overlayPosition": {
-                        "anchorCell": {"sheetId": chart_sheet_id, "rowIndex": 20, "columnIndex": 6},
-                        "widthPixels": 600, "heightPixels": 360
-                    }}
-                }
-            }
-        }
-    ]
-    api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":charts}).execute()
-    print("Google Sheets full repository-data sync succeeded:", ", ".join(data))
-    print(f"Storage JSON files={len(data['Storage Files'])-1}; raw data chunks={len(data['Raw Data'])-1}; candle-history files excluded.")
+    print("Google Sheets compact sync succeeded:", ", ".join(data))
+    print("Only the nine requested tabs remain; raw JSON and Top 20 export are disabled.")
 
 
 if __name__ == "__main__":
