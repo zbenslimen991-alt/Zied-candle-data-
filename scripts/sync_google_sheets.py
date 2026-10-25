@@ -213,7 +213,7 @@ def build_data(tree):
         ("اسم العملة", ("instId", "symbol", "coin", "asset", "instrument")),
         ("سعر الدخول", ("entryPrice", "entry_price", "avgEntryPrice", "openPrice")),
         ("طريقة الخروج", ("exitReason", "closeReason", "exitType", "closeType", "reason", "exit_reason")),
-        ("صافي الربح", ("netPnl", "netProfit", "realizedPnl", "pnlNet", "pnl", "profit")),
+        ("صافي الربح", ("netPnl", "netProfit", "realizedPnl", "pnlNet", "profitUsd", "pnl", "profit")),
         ("الاستراتيجية", ("strategy", "strategyName", "strategy_name")),
     ]
 
