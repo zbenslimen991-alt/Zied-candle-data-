@@ -354,10 +354,15 @@ def main():
         fields="sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))"
     ).execute()
     existing = {x["properties"]["title"]: x for x in meta.get("sheets", [])}
+    # Monthly Trades and Portfolio Summary are user-requested preserve-as-is tabs.
+    # Do not overwrite their existing contents during this compact sync.
+    preserve_tabs = {"Monthly Trades", "Portfolio Summary"}
+    write_data = {name: rows for name, rows in data.items()
+                  if name not in preserve_tabs or name not in existing}
 
     # Create missing retained tabs.
     additions = []
-    for name, rows in data.items():
+    for name, rows in write_data.items():
         if name not in existing:
             additions.append({"addSheet": {"properties": {
                 "title": name,
@@ -389,7 +394,7 @@ def main():
     ).execute()
     existing = {x["properties"]["title"]: x for x in meta.get("sheets", [])}
     grid_requests = []
-    for name, rows in data.items():
+    for name, rows in write_data.items():
         props = existing[name]["properties"]
         needed_rows = max(1000, len(rows) + 10)
         needed_cols = max(1, max((len(row) for row in rows), default=1))
@@ -411,12 +416,12 @@ def main():
     execute_sheet_write(api.spreadsheets().values().batchClear(
         spreadsheetId=sheet_id,
         body={"ranges": [f"'{name}'!A:{column_letter(max(1, max((len(row) for row in rows), default=1)))}"
-                         for name, rows in data.items()]}
+                         for name, rows in write_data.items()]}
     ))
-    for name, rows in data.items():
+    for name, rows in write_data.items():
         write_sheet_in_chunks(api, sheet_id, name, rows)
 
-    print("Google Sheets compact sync succeeded:", ", ".join(data))
+    print("Google Sheets compact sync succeeded:", ", ".join(write_data))
     print("Only the nine requested tabs remain; raw JSON and Top 20 export are disabled.")
 
 
