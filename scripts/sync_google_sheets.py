@@ -20,18 +20,31 @@ GH_HEADERS = {"Authorization": f"Bearer {TOKEN}", "Accept": "application/vnd.git
 MAX_CELL_CHARS = 40000
 MAX_BATCH_BYTES = 1500000
 MAX_BATCH_ROWS = 2000
+MIN_SECONDS_BETWEEN_SHEET_WRITES = 1.1
+_last_sheet_write_at = 0.0
 
 
-def execute_with_retry(request, attempts=6):
+def execute_with_retry(request, attempts=8):
     for attempt in range(attempts):
         try:
             return request.execute()
         except HttpError as exc:
             if exc.resp.status not in (429, 500, 502, 503, 504) or attempt == attempts - 1:
                 raise
-            delay = min(30, 2 ** attempt)
+            delay = min(60, 5 * (2 ** attempt)) if exc.resp.status == 429 else min(30, 2 ** attempt)
             print(f"Google API returned HTTP {exc.resp.status}; retrying in {delay}s.")
             time.sleep(delay)
+
+
+def execute_sheet_write(request):
+    """Throttle Sheets writes to reduce per-user quota errors."""
+    global _last_sheet_write_at
+    elapsed = time.monotonic() - _last_sheet_write_at
+    if elapsed < MIN_SECONDS_BETWEEN_SHEET_WRITES:
+        time.sleep(MIN_SECONDS_BETWEEN_SHEET_WRITES - elapsed)
+    result = execute_with_retry(request)
+    _last_sheet_write_at = time.monotonic()
+    return result
 
 
 def github_get(url, timeout=90):
@@ -291,7 +304,7 @@ def write_sheet_in_chunks(api, sheet_id, title, rows):
         row = [safe(v) for v in row]
         row_size = len(json.dumps(row, ensure_ascii=False, default=str).encode("utf-8"))
         if batch and (len(batch) >= MAX_BATCH_ROWS or batch_bytes + row_size > MAX_BATCH_BYTES):
-            execute_with_retry(api.spreadsheets().values().update(
+            execute_sheet_write(api.spreadsheets().values().update(
                 spreadsheetId=sheet_id, range=f"'{title}'!A{start}",
                 valueInputOption="RAW", body={"majorDimension":"ROWS","values":batch}
             ))
@@ -302,7 +315,7 @@ def write_sheet_in_chunks(api, sheet_id, title, rows):
         batch.append(row)
         batch_bytes += row_size
     if batch:
-        execute_with_retry(api.spreadsheets().values().update(
+        execute_sheet_write(api.spreadsheets().values().update(
             spreadsheetId=sheet_id, range=f"'{title}'!A{start}",
             valueInputOption="RAW", body={"majorDimension":"ROWS","values":batch}
         ))
@@ -378,10 +391,10 @@ def main():
     if expand_rows:
         api.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body={"requests":expand_rows}).execute()
     # Clear the tabs first so stale rows disappear when a data source shrinks.
-    api.spreadsheets().values().batchClear(
+    execute_sheet_write(api.spreadsheets().values().batchClear(
         spreadsheetId=SHEET_ID,
         body={"ranges":[f"'{name}'!A:{column_letter(max(1, (7 if name == 'Charts' else max((len(row) for row in rows), default=1))))}" for name, rows in data.items()]}
-    ).execute()
+    ))
     for name, rows in data.items():
         write_sheet_in_chunks(api, SHEET_ID, name, rows)
 
