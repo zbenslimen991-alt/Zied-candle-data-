@@ -250,7 +250,7 @@ def build_data(tree):
             continue
         date_value = first_value(item, "closedAt", "closeTime", "exitTime", "updatedAt", "timestamp", "date")
         month = str(date_value)[:7] if date_value else "غير محدد"
-        pnl = first_value(item, "netPnl", "netProfit", "realizedPnl", "pnlNet", "pnl", "profit", default=0)
+        pnl = first_value(item, "netPnl", "netProfit", "realizedPnl", "pnlNet", "profitUsd", "pnl", "profit", default=0)
         try:
             pnl = float(pnl)
         except (TypeError, ValueError):
