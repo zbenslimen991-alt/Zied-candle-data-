@@ -301,7 +301,7 @@ def build_data(tree):
         if trade_time:
             if trade_time.date().isoformat() == today_key:
                 realized_today += pnl
-            if trade_time.date().isoformat() >= week_start:
+            if week_start <= trade_time.date().isoformat() <= today_key:
                 realized_week += pnl
 
     unrealized_pnl = 0.0
