@@ -44,7 +44,7 @@ jobs:
         working-directory: app
         run: |
           set -euo pipefail
-          for pattern in 'ml_model_memory_*.json' 'analysis_memory_*.json' 'strategy_stats_*.json'; do
+          for pattern in 'ml_model_memory_*.json' 'analysis_memory_*.json'; do
             file="$(find . -maxdepth 2 -type f -name "$pattern" -size +0c -print -quit)"
             if [ -z "$file" ]; then
               echo "ERROR: required learning state missing or empty: $pattern"
@@ -122,7 +122,7 @@ jobs:
           set -o pipefail
           python okx_quant/weekly_learning.py 2>&1 | tee "${RUNNER_TEMP}/daily-learning.log"
 
-      - name: Run strategy and candle freshness audit
+      - name: Run closed-trade and candle freshness audit
         working-directory: app
         run: |
           set -o pipefail
